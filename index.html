@@ -871,10 +871,11 @@ globalThis.WaveCore = (() => {
       const tx = (b[0] - a[0]) / len, ty = (b[1] - a[1]) / len, nx = -ty, ny = tx;
       const w = (width / 2) * profile(i / (pts.length - 1), tx, ty);
       let ox = nx * w, oy = ny * w;
-      if (nibAngle != null) { // the nib's full half width, with its part across the line kept to at least 12% so it never vanishes
-        const cx = Math.cos(nibAngle) * w, cy = Math.sin(nibAngle) * w, across = cx * nx + cy * ny;
-        const kept = (across < 0 ? -1 : 1) * Math.max(Math.abs(across), 0.12 * w);
-        ox = cx + nx * (kept - across); oy = cy + ny * (kept - across);
+      if (nibAngle != null) { // a flat pen, w long and 12% as thick: each edge runs along the pen corner facing its side,
+        // so the edges never cross and the stroke never gets thinner than the pen's own thickness
+        const ux = Math.cos(nibAngle), uy = Math.sin(nibAngle), along = ux * nx + uy * ny, across = -uy * nx + ux * ny;
+        const sa = along < 0 ? -w : w, sc = across < 0 ? -0.12 * w : 0.12 * w;
+        ox = ux * sa - uy * sc; oy = uy * sa + ux * sc;
       }
       left.push([pts[i][0] + ox, pts[i][1] + oy]);
       right.push([pts[i][0] - ox, pts[i][1] - oy]);
@@ -1598,7 +1599,9 @@ globalThis.WaveCore = (() => {
       fillRibbons(c, cut.map((r) => ({ ...r, color: "#000" })));
       c.globalCompositeOperation = "source-over";
     }
-    for (const kind of ["accent", "shapefill", "letter", "paint", "wake"]) fillRibbons(c, g.ribbons.filter((r) => r.kind === kind));
+    for (const kind of ["accent", "shapefill"]) fillRibbons(c, g.ribbons.filter((r) => r.kind === kind));
+    for (const r of g.ribbons) if (r.kind === "letter" || r.kind === "paint") fillRibbons(c, [r]); // in painted order, like the export
+    fillRibbons(c, g.ribbons.filter((r) => r.kind === "wake"));
     for (const f of g.fills) {
       const p = new Path2D();
       for (const ring of f.rings) {
@@ -1780,7 +1783,8 @@ globalThis.WaveCore = (() => {
     for (const line of core.localOutlines(el)) for (const [x, y] of line) {
       x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
     }
-    const half = el.type === "stroke" && typeof el.size === "number" ? el.size / 2 : 0;
+    const auto = el.type === "stroke" && el.points.length === 1 ? 0.7 * design.style.sea.spacingMm : 0; // an automatic-size dot
+    const half = el.type === "stroke" && typeof el.size === "number" ? el.size / 2 : auto;
     const pad = Math.max(design.style.sea.spacingMm / 2, half) / el.transform.s; // thin strokes still get a grabbable box
     return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   }
@@ -2447,6 +2451,12 @@ globalThis.WaveCore = (() => {
           if (design.style.palette.strokes.length < 2) return;
           mutate((d) => {
             const p = d.style.palette;
+            // paint in this colour keeps it as a fixed colour; paint in later colours follows them to their new place
+            for (const el of d.drawing.elements) {
+              if (el.type !== "stroke" || !el.color || typeof el.color.palette !== "number") continue;
+              if (el.color.palette === i) el.color = p.strokes[i].color;
+              else if (el.color.palette > i) el.color = { palette: el.color.palette - 1 };
+            }
             p.strokes.splice(i, 1);
             if (p.transparent === i) p.transparent = null;
             else if (typeof p.transparent === "number" && p.transparent > i) p.transparent--;

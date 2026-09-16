@@ -755,3 +755,22 @@ test("paint view shows a visible stroke in its colour at its brush width", async
   assert.deepStrictEqual(await pixelAt(page, mm(12), 0.5), [250, 248, 242, 255], "12 mm out: paper");
   assert.deepStrictEqual(page.errors, []);
 });
+
+test("removing a palette colour keeps the colour of visible paint that used it or a later one", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await page.getByRole("button", { name: "Visible", exact: true }).click();
+  await page.getByRole("button", { name: "Paint colour: stroke colour 2", exact: true }).click();
+  await drag(page, [0.3, 0.3], [0.3, 0.6]);
+  await page.getByRole("button", { name: "Paint colour: stroke colour 3", exact: true }).click();
+  await drag(page, [0.6, 0.3], [0.6, 0.6]);
+  const before = (await exportedDesign(page)).style.palette.strokes.map((s) => s.color);
+
+  await page.locator("summary", { hasText: "Colours" }).click();
+  await page.getByRole("button", { name: "Remove colour 2", exact: true }).click();
+  const d = await exportedDesign(page);
+  const [removed, shifted] = d.drawing.elements;
+  assert.strictEqual(removed.color, before[1], "the removed colour stays on its paint as a fixed colour");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(shifted.color)), { palette: 1 }, "a later colour keeps following its palette slot");
+  assert.strictEqual(d.style.palette.strokes[1].color, before[2]);
+});
