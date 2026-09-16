@@ -156,7 +156,7 @@ test("the eraser cuts a letter stroke in two", async () => {
 
   const strokes = (await exportedDesign(page)).drawing.elements.filter((e) => e.type === "stroke");
   assert.strictEqual(strokes.length, 2);
-  const xs = strokes.map((s) => worldPoints(s).map((p) => p[0] / 500));
+  const xs = strokes.map((s) => worldPoints(s).map((p) => p[0] / 297));
   assert.ok(xs.some((x) => Math.max(...x) < 0.5) && xs.some((x) => Math.min(...x) > 0.5), "one piece left, one right of the cut");
 });
 
@@ -345,17 +345,49 @@ test("erasing near one end keeps the far end of the stroke exactly", async () =>
 test("letter view shows the smoothed letters when smoothing is on", async () => {
   const page = await openTool();
   await page.getByRole("button", { name: "Letter", exact: true }).click();
-  // zigzag across the middle: 12 mm up and down every 8 mm (canvas is 500 x 700 mm)
-  const pts = Array.from({ length: 21 }, (_, i) => [(170 + i * 8) / 500, (350 + (i % 2 ? 12 : -12)) / 700]);
+  // zigzag across the middle: 12 mm up and down every 8 mm (canvas is 297 x 420 mm)
+  const pts = Array.from({ length: 21 }, (_, i) => [(68 + i * 8) / 297, (210 + (i % 2 ? 12 : -12)) / 420]);
   await page.mouse.move(...(await at(page, ...pts[0])));
   await page.mouse.down();
   for (const p of pts.slice(1)) await page.mouse.move(...(await at(page, ...p)), { steps: 4 });
   await page.mouse.up();
   await page.getByRole("button", { name: "Letter view" }).click();
-  const peak = [(170 + 10 * 8) / 500, (350 - 12) / 700];
+  const peak = [(68 + 10 * 8) / 297, (210 - 12) / 420];
   assert.deepStrictEqual(await pixelAt(page, ...peak), [29, 39, 51, 255], "raw zigzag peak is inked");
 
   await page.locator("summary", { hasText: "Letters" }).click();
   await page.getByRole("slider", { name: "Smooth letters" }).fill("1");
   assert.deepStrictEqual(await pixelAt(page, ...peak), [250, 248, 242, 255], "smoothed letter no longer reaches the peak");
+});
+
+test("on a phone the canvas and the tools both fit on screen, and a finger draws a letter", async () => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e));
+  await page.goto(TOOL_URL);
+  await page.getByRole("status").filter({ hasText: /ms/ }).waitFor();
+
+  assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth), 390, "no sideways scrolling");
+  const stage = await page.locator("#stage").boundingBox();
+  assert.ok(stage.y >= 0 && stage.y + stage.height <= 844 && stage.height > 250, `canvas on screen: ${JSON.stringify(stage)}`);
+  const letter = await page.getByRole("button", { name: "Letter", exact: true }).boundingBox();
+  assert.ok(letter.y + letter.height <= 844 && letter.height >= 40, `Letter tool reachable and finger-sized: ${JSON.stringify(letter)}`);
+
+  await page.getByRole("button", { name: "Letter", exact: true }).tap();
+  await touch(page, [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6].map((f) => [[stage.x + 0.4 * stage.width, stage.y + f * stage.height]]));
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1, "finger stroke");
+  assert.deepStrictEqual(errors, []);
+});
+
+test("the size is the first step and a new design starts as A3 portrait", async () => {
+  const page = await openTool();
+  assert.match(await page.locator(".step h2").first().innerText(), /size/i);
+  const size = page.getByLabel("Size", { exact: true });
+  assert.strictEqual(await size.evaluate((s) => s.selectedOptions[0].text), "A3 portrait 29.7 × 42");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify((await exportedDesign(page)).drawing.canvas)), { widthCm: 29.7, heightCm: 42 });
+
+  await size.selectOption({ label: "A2 portrait 42 × 59.4" });
+  assert.strictEqual(await size.evaluate((s) => s.selectedOptions[0].text), "A2 portrait 42 × 59.4", "the chosen size stays shown");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify((await exportedDesign(page)).drawing.canvas)), { widthCm: 42, heightCm: 59.4 });
+  assert.deepStrictEqual(page.errors, []);
 });

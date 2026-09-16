@@ -78,6 +78,28 @@
     background: var(--ink); color: var(--panel); opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
   #toast.error { background: var(--danger); color: #fff; }
+
+  /* Phones: canvas on top, the painting and style controls scroll underneath */
+  @media (max-width: 760px) {
+    .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 52vh) minmax(0, 1fr); height: 100vh; height: 100dvh; }
+    main { grid-row: 1; }
+    .panel { grid-row: 2; border-right: 0; border-top: 1px solid var(--line); padding: 8px 12px 40px; -webkit-overflow-scrolling: touch; }
+    h1, .tagline { display: none; }
+    .step { margin-top: 4px; }
+    .step:first-of-type { border-top: 0; }
+    .lead { font-size: 13px; }
+    button { min-height: 40px; }
+    .tools { grid-template-columns: repeat(4, 1fr); }
+    .tools .wide { grid-column: span 2; }
+    .tools button { padding: 6px 2px; font-size: 12px; }
+    .topbar { gap: 4px; padding: 4px 6px; }
+    .topbar button { padding: 4px 9px; }
+    #status { font-size: 11px; flex-basis: 100%; margin: 0; text-align: right; }
+    .hint { font-size: 12px; padding: 3px 8px; }
+    input[type=number], input[type=text], select { font-size: 16px; } /* stops iOS zooming into focused fields */
+    .history { grid-template-columns: repeat(4, 1fr); }
+    #toast { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+  }
 </style>
 </head>
 <body>
@@ -87,7 +109,16 @@
     <p class="tagline">Paint a name, hide it in the waves.</p>
 
     <section class="step">
-      <h2><span class="num">1</span>Paint your letters</h2>
+      <h2><span class="num">1</span>Choose the size</h2>
+      <label class="field"><span>Size</span><select id="canvas-preset" aria-label="Size"></select></label>
+      <div class="row">
+        <label class="field"><span>Width (cm)</span><input id="canvas-w" type="number" min="1" max="500" step="0.1"></label>
+        <label class="field"><span>Height (cm)</span><input id="canvas-h" type="number" min="1" max="500" step="0.1"></label>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2><span class="num">2</span>Paint your letters</h2>
       <p class="lead">Names aren't typed: draw every letter yourself with the Letter tool. The waves bend around whatever you paint.</p>
       <div class="tools">
         <button data-tool="stroke" title="Draw a letter stroke (L)"><span class="icon" aria-hidden="true">✎</span>Letter</button>
@@ -115,7 +146,7 @@
     </section>
 
     <section class="step">
-      <h2><span class="num">2</span>Find a look</h2>
+      <h2><span class="num">3</span>Find a look</h2>
       <button id="surprise" class="primary big">🎲 Surprise me</button>
       <div class="checks" role="group" aria-label="Surprise me may change">
         <label class="check"><input type="checkbox" id="sg-flow" checked>Flow &amp; seed</label>
@@ -128,7 +159,7 @@
     </section>
 
     <section class="step">
-      <h2><span class="num">3</span>Style</h2>
+      <h2><span class="num">4</span>Style</h2>
       <details open>
         <summary>Flow</summary>
         <label class="field"><span>Flow preset</span><select id="flow-preset"></select></label>
@@ -178,12 +209,7 @@
     </section>
 
     <section class="step">
-      <h2><span class="num">4</span>File</h2>
-      <label class="field"><span>Canvas preset</span><select id="canvas-preset"></select></label>
-      <div class="row">
-        <label class="field"><span>Width (cm)</span><input id="canvas-w" type="number" min="1" max="500" step="0.1"></label>
-        <label class="field"><span>Height (cm)</span><input id="canvas-h" type="number" min="1" max="500" step="0.1"></label>
-      </div>
+      <h2><span class="num">5</span>File</h2>
       <div class="row">
         <button id="open-btn">Open SVG…</button>
         <button id="reset" title="Start over with the default design (Undo brings it back)">Reset</button>
@@ -280,7 +306,7 @@ globalThis.WaveCore = (() => {
     };
   }
   function defaultDesign() {
-    return { version: 2, drawing: { canvas: { widthCm: 50, heightCm: 70 }, elements: [] }, style: defaultStyle() };
+    return { version: 2, drawing: { canvas: { widthCm: 29.7, heightCm: 42 }, elements: [] }, style: defaultStyle() };
   }
   // Fill in style settings that did not exist when a design or style file was saved.
   function completeStyle(style) {
@@ -1115,8 +1141,9 @@ globalThis.WaveCore = (() => {
 
   // canvas sizes are starting points; confirm real panel sizes with the printer
   const CANVAS_PRESETS = [
-    ["Jersey panel (placeholder) 50 × 70", 50, 70],
     ["A3 portrait 29.7 × 42", 29.7, 42],
+    ["A3 landscape 42 × 29.7", 42, 29.7],
+    ["Jersey panel (placeholder) 50 × 70", 50, 70],
     ["A2 portrait 42 × 59.4", 42, 59.4],
     ["Square 50 × 50", 50, 50],
   ];
@@ -1126,7 +1153,10 @@ globalThis.WaveCore = (() => {
   let undoStack = [], redoStack = [], coalesce = null;
   let tool = "select", selectedId = null;
   let geo = null, statusNote = "", letterView = false;
-  const ui = { eraserMm: 8, fingerDraws: false };
+  // Phones have no pen, so there a finger draws (two fingers still pan and zoom)
+  const PHONE = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600;
+  const ui = { eraserMm: 8, fingerDraws: PHONE };
+  $("finger-draws").checked = PHONE;
   const els = () => design.drawing.elements;
   const W = () => design.drawing.canvas.widthCm * 10, H = () => design.drawing.canvas.heightCm * 10;
 
@@ -1203,7 +1233,7 @@ globalThis.WaveCore = (() => {
 
   function layout({ repaint = true } = {}) {
     const ws = workspace.getBoundingClientRect();
-    const pad = 24;
+    const pad = PHONE ? 8 : 24;
     const fit = Math.max(0.05, Math.min((ws.width - 2 * pad) / W(), (ws.height - 2 * pad) / H()));
     k = fit * view.zoom;
     stage.style.width = W() * k + "px";
@@ -1213,7 +1243,7 @@ globalThis.WaveCore = (() => {
     if (!repaint) return;
     // keep the bitmap within ~16 megapixels however far you zoom in
     const dpr = window.devicePixelRatio || 1;
-    pxPerMm = Math.min(k * dpr, Math.sqrt(16e6 / (W() * H())));
+    pxPerMm = Math.min(k * dpr, Math.sqrt((PHONE ? 6e6 : 16e6) / (W() * H()))); // phone browsers refuse very large canvases
     stage.width = seaCanvas.width = Math.max(1, Math.round(W() * pxPerMm));
     stage.height = seaCanvas.height = Math.max(1, Math.round(H() * pxPerMm));
     paintSea();
@@ -1405,7 +1435,7 @@ globalThis.WaveCore = (() => {
     boat: "Tap to place the boat. The waves part around it.",
     shape: "Draw a closed outline. Choose Solid, Woven or Wave-filled for it under Selection.",
   };
-  const NAV_HINT = " Pinch or scroll to zoom, two fingers or right-drag to pan.";
+  const NAV_HINT = PHONE ? " Two fingers pan and pinch to zoom." : " Pinch or scroll to zoom, two fingers or right-drag to pan.";
   let drawing = null, dragOp = null, eraseSession = 0;
 
   function toMM(e) {
@@ -1651,13 +1681,12 @@ globalThis.WaveCore = (() => {
   function fillSelect(sel, placeholder, names) {
     sel.innerHTML = `<option value="">${placeholder}</option>` + names.map((n, i) => `<option value="${i}">${n}</option>`).join("");
   }
-  fillSelect($("canvas-preset"), "Choose size…", CANVAS_PRESETS.map((p) => p[0]));
+  fillSelect($("canvas-preset"), "Custom size", CANVAS_PRESETS.map((p) => p[0]));
   fillSelect($("flow-preset"), "Choose flow…", Object.keys(core.FLOW_PRESETS));
   fillSelect($("palette-preset"), "Choose palette…", Object.keys(core.PALETTES));
 
   $("canvas-preset").addEventListener("change", (e) => {
     const p = CANVAS_PRESETS[e.target.value];
-    e.target.value = "";
     if (p) mutate((d) => { d.drawing.canvas.widthCm = p[1]; d.drawing.canvas.heightCm = p[2]; });
   });
   $("flow-preset").addEventListener("change", (e) => {
@@ -1681,6 +1710,11 @@ globalThis.WaveCore = (() => {
     });
     refreshers.push(() => { if (document.activeElement !== input) input.value = get(design); });
   }
+  refreshers.push(() => { // the size list shows the current size, or "Custom size"
+    const { widthCm, heightCm } = design.drawing.canvas;
+    $("canvas-preset").value = CANVAS_PRESETS.findIndex((p) => p[1] === widthCm && p[2] === heightCm);
+    if ($("canvas-preset").selectedIndex < 0) $("canvas-preset").value = "";
+  });
   numberField($("canvas-w"), (d) => d.drawing.canvas.widthCm, (d, v) => (d.drawing.canvas.widthCm = v), 1, 500);
   numberField($("canvas-h"), (d) => d.drawing.canvas.heightCm, (d, v) => (d.drawing.canvas.heightCm = v), 1, 500);
   numberField($("seed"), (d) => d.style.sea.seed, (d, v) => (d.style.sea.seed = Math.round(v)), 0, 2 ** 31 - 1);
