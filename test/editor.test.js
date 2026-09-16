@@ -341,3 +341,21 @@ test("erasing near one end keeps the far end of the stroke exactly", async () =>
   const end = worldPoints(piece).reduce((a, p) => (p[0] > a[0] ? p : a));
   assert.ok(Math.hypot(end[0] - farEnd[0], end[1] - farEnd[1]) < 0.5, `far end moved from ${farEnd} to ${end}`);
 });
+
+test("letter view shows the smoothed letters when smoothing is on", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  // zigzag across the middle: 12 mm up and down every 8 mm (canvas is 500 x 700 mm)
+  const pts = Array.from({ length: 21 }, (_, i) => [(170 + i * 8) / 500, (350 + (i % 2 ? 12 : -12)) / 700]);
+  await page.mouse.move(...(await at(page, ...pts[0])));
+  await page.mouse.down();
+  for (const p of pts.slice(1)) await page.mouse.move(...(await at(page, ...p)), { steps: 4 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Letter view" }).click();
+  const peak = [(170 + 10 * 8) / 500, (350 - 12) / 700];
+  assert.deepStrictEqual(await pixelAt(page, ...peak), [29, 39, 51, 255], "raw zigzag peak is inked");
+
+  await page.locator("summary", { hasText: "Letters" }).click();
+  await page.getByRole("slider", { name: "Smooth letters" }).fill("1");
+  assert.deepStrictEqual(await pixelAt(page, ...peak), [250, 248, 242, 255], "smoothed letter no longer reaches the peak");
+});

@@ -692,6 +692,12 @@ globalThis.WaveCore = (() => {
     });
   }
 
+  // A painted stroke as the generator sees it: in world mm, resampled, smoothed by the style.
+  function letterPath(el, style, step) {
+    const raw = resample(el.points.map((p) => applyTransform(el.transform, p)), step);
+    return smoothLine(raw, (style.letters.smooth || 0) * 8, step);
+  }
+
   function ribbon(line, width, profile, step) {
     const sub = line.filter((_, i) => i % 3 === 0 || i === line.length - 1);
     const pts = resample(sub.length > 3 ? chaikin(sub, 1) : sub, step);
@@ -881,8 +887,7 @@ globalThis.WaveCore = (() => {
     const letterLines = [];
     for (const el of drawing.elements) {
       if (el.type !== "stroke" || el.points.length < 2) continue;
-      const raw = resample(el.points.map((p) => applyTransform(el.transform, p)), step);
-      const pts = smoothLine(raw, (style.letters.smooth || 0) * 8, step);
+      const pts = letterPath(el, style, step);
       block(pts, dsep / 2);
       offsetSeeds(pts, dsep, seeds);
       letterLines.push(pts);
@@ -1075,7 +1080,7 @@ globalThis.WaveCore = (() => {
   }
 
   return { defaultDesign, defaultStyle, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
-    exportStyle, parseStyle, centred, eraseStrokes, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
+    exportStyle, parseStyle, centred, eraseStrokes, letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
 })();
 </script>
 <script id="app">
@@ -1115,6 +1120,7 @@ globalThis.WaveCore = (() => {
   }
   function changed({ immediate = false } = {}) {
     if (!els().some((e) => e.id === selectedId)) selectedId = null;
+    if (letterView) paintSea(); // letter view needs no generation, so show edits right away
     refreshControls();
     schedulePreview(immediate);
     draw();
@@ -1252,7 +1258,7 @@ globalThis.WaveCore = (() => {
     c.fillRect(0, 0, W(), H());
     c.lineJoin = c.lineCap = "round";
     for (const el of els()) {
-      const lines = worldOutlines(el);
+      const lines = el.type === "stroke" ? [core.letterPath(el, design.style, design.style.sea.spacingMm / 10)] : worldOutlines(el);
       c.beginPath();
       for (const line of lines) {
         line.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
