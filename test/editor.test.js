@@ -608,9 +608,9 @@ test("dragging in the jersey view moves the print in cm, and Back print default 
   const page = await openTool();
   await page.getByRole("button", { name: "Jersey", exact: true }).click();
   await shirtPainted(page);
-  // the M jersey's photo spans 453 px at 52 cm over its 282 px torso: the stage is 453 / 282 * 52 cm wide
+  // the photo keeps its proportions, scaled so the M jersey's 627.5 px from neck to hem are 72 cm: the stage is 453 px of that wide
   const box = await page.locator("#stage").boundingBox();
-  const pxPerCm = box.width / ((453 / 282) * 52);
+  const pxPerCm = box.width / ((453 / 627.5) * 72);
   const [x0, y0] = [box.x + box.width / 2, box.y + box.height * 0.4];
   await page.mouse.move(x0, y0);
   await page.mouse.down();
