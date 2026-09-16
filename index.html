@@ -64,6 +64,11 @@
   .history .look > button:first-child { padding: 0; width: 100%; overflow: hidden; line-height: 0; }
   .history img { width: 100%; display: block; }
   .history .star { position: absolute; top: 2px; right: 2px; padding: 0 5px; font-size: 13px; line-height: 18px; }
+  .figure-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin: 8px 0; max-height: 220px; overflow-y: auto; }
+  .figure-grid[hidden] { display: none; }
+  .figure-grid button { padding: 2px; height: 44px; display: grid; place-items: center; background: #587ca0; }
+  .figure-grid button[aria-pressed=true] { outline: 3px solid var(--sel); outline-offset: -3px; }
+  .figure-grid img { max-width: 100%; max-height: 38px; }
   .library-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 4px; align-items: center; margin: 4px 0; }
   .empty { color: var(--muted); font-style: italic; margin: 4px 0; }
   main { display: grid; grid-template-rows: auto auto 1fr; min-width: 0; }
@@ -124,11 +129,12 @@
         <button data-tool="stroke" title="Draw a letter stroke (L)"><span class="icon" aria-hidden="true">✎</span>Letter</button>
         <button data-tool="eraser" title="Rub out parts of letter strokes (E)"><span class="icon" aria-hidden="true">⌫</span>Eraser</button>
         <button data-tool="dot" title="Place a dot (D)"><span class="icon" aria-hidden="true">●</span>Dot</button>
-        <button data-tool="boat" title="Place the boat (B)"><span class="icon" aria-hidden="true">⛵</span>Boat</button>
+        <button data-tool="stamp" title="Stamp surfers, boats or the letter boat (B)"><span class="icon" aria-hidden="true">⛵</span>Stamp</button>
         <button data-tool="shape" title="Draw a shape (S)"><span class="icon" aria-hidden="true">⬠</span>Shape</button>
         <button id="import-btn" title="Import an SVG silhouette"><span class="icon" aria-hidden="true">⇪</span>Import SVG…</button>
         <button data-tool="select" class="wide" title="Select, move, scale, rotate (V)"><span aria-hidden="true">↖</span>Select</button>
       </div>
+      <div id="stamp-picker" class="figure-grid" role="group" aria-label="Stamps" hidden></div>
       <input type="file" id="import-file" accept=".svg,image/svg+xml" hidden>
       <div class="row">
         <button id="undo" title="Ctrl+Z">Undo</button>
@@ -923,6 +929,10 @@ globalThis.WaveCore = (() => {
       case "dot": return [circleRing(el.radius)];
       case "boat": return [BOAT.sail, BOAT.hull];
       case "svg": return el.parts.flat();
+      case "stamp": { // the picture's rectangle at scale 1
+        const { length: l, width: w } = figure(el.figure) ? stampSize({ ...el, transform: { ...el.transform, s: 1 } }) : { length: 20, width: 20 };
+        return [[[-l / 2, -w / 2], [l / 2, -w / 2], [l / 2, w / 2], [-l / 2, w / 2], [-l / 2, -w / 2]]];
+      }
       default: return el.rings;
     }
   }
@@ -1247,7 +1257,7 @@ globalThis.WaveCore = (() => {
   }
 
   return { defaultDesign, defaultStyle, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
-    exportStyle, parseStyle, centred, eraseStrokes, figure, registerFigures, letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
+    exportStyle, parseStyle, centred, eraseStrokes, figure, registerFigures, figureList: () => [...FIGURES.values()], letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
 })();
 </script>
 <script id="app">
@@ -1271,7 +1281,8 @@ globalThis.WaveCore = (() => {
   let geo = null, statusNote = "", letterView = false;
   // Phones have no pen, so there a finger draws (two fingers still pan and zoom)
   const PHONE = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600;
-  const ui = { eraserMm: 8, fingerDraws: PHONE };
+  const LETTER_BOAT = "letter-boat";
+  const ui = { eraserMm: 8, fingerDraws: PHONE, stampFigure: LETTER_BOAT };
   $("finger-draws").checked = PHONE;
   const els = () => design.drawing.elements;
   const W = () => design.drawing.canvas.widthCm * 10, H = () => design.drawing.canvas.heightCm * 10;
@@ -1438,6 +1449,14 @@ globalThis.WaveCore = (() => {
     c.fillRect(0, 0, W(), H());
     c.lineJoin = c.lineCap = "round";
     for (const el of els()) {
+      if (el.type === "stamp") {
+        const f = core.figure(el.figure), img = f && figureImage(el.figure);
+        if (img && img.complete && img.naturalWidth) {
+          const t = tf(el), [l, w] = [core.localOutlines(el)[0][1][0] * 2 * t.s, core.localOutlines(el)[0][2][1] * 2 * t.s];
+          c.save(); c.translate(t.x, t.y); c.rotate(t.r); c.drawImage(img, -l / 2, -w / 2, l, w); c.restore();
+        }
+        continue;
+      }
       const lines = el.type === "stroke" ? [core.letterPath(el, design.style, design.style.sea.spacingMm / 10)] : worldOutlines(el);
       c.beginPath();
       for (const line of lines) {
@@ -1463,7 +1482,7 @@ globalThis.WaveCore = (() => {
     let img = figureImages.get(id);
     if (!img) {
       img = new Image();
-      img.onload = () => { if (geo && geo.figures.some((f) => f.figure === id)) { paintSea(); draw(); } };
+      img.onload = () => { paintSea(); draw(); };
       img.src = core.figure(id).href;
       figureImages.set(id, img);
     }
@@ -1479,7 +1498,13 @@ globalThis.WaveCore = (() => {
   }
 
   // ---------- element geometry helpers (world mm)
-  const worldOutlines = (el) => core.localOutlines(el).map((line) => line.map((p) => core.applyTransform(el.transform, p)));
+  // A stamp that follows the flow has no angle of its own (r: null); use the one the last generation gave it
+  function tf(el) {
+    if (el.transform.r != null) return el.transform;
+    const placed = geo && geo.figures.find((f) => f.stamp === el.id);
+    return { ...el.transform, r: placed ? placed.angle : 0 };
+  }
+  const worldOutlines = (el) => core.localOutlines(el).map((line) => line.map((p) => core.applyTransform(tf(el), p)));
   function localBox(el) {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const line of core.localOutlines(el)) for (const [x, y] of line) {
@@ -1489,13 +1514,13 @@ globalThis.WaveCore = (() => {
     return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   }
   function toLocal(el, [x, y]) {
-    const t = el.transform, dx = (x - t.x) / t.s, dy = (y - t.y) / t.s;
+    const t = tf(el), dx = (x - t.x) / t.s, dy = (y - t.y) / t.s;
     const c = Math.cos(-t.r), s = Math.sin(-t.r);
     return [c * dx - s * dy, s * dx + c * dy];
   }
   function handles(el) {
     const [x0, y0, x1, y1] = localBox(el);
-    const w = (p) => core.applyTransform(el.transform, p);
+    const w = (p) => core.applyTransform(tf(el), p);
     const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(w);
     const top = w([(x0 + x1) / 2, y0]), c = [el.transform.x, el.transform.y];
     const len = Math.hypot(top[0] - c[0], top[1] - c[1]) || 1;
@@ -1568,7 +1593,7 @@ globalThis.WaveCore = (() => {
     stroke: "Draw a letter stroke. The waves bend along it; a spiral makes a whirlpool.",
     eraser: "Rub over letter strokes to remove parts of them. Shapes, dots and the boat are removed with Select + Delete.",
     dot: "Tap to place a dot (like the dot on an i).",
-    boat: "Tap to place the boat. The waves part around it.",
+    stamp: "Pick a figure, then tap to stamp it. Pictures ride on the waves and turn to the flow; the letter boat parts them.",
     shape: "Draw a closed outline. Choose Solid, Woven or Wave-filled for it under Selection.",
   };
   const NAV_HINT = PHONE ? " Two fingers pan and pinch to zoom." : " Pinch or scroll to zoom, two fingers or right-drag to pan.";
@@ -1584,7 +1609,28 @@ globalThis.WaveCore = (() => {
     $("hint").textContent = HINTS[t] + NAV_HINT;
     stage.style.cursor = t === "select" ? "default" : t === "eraser" ? "none" : "crosshair";
     $("eraser-size").hidden = t !== "eraser";
+    $("stamp-picker").hidden = t !== "stamp";
     select(t === "select" ? selectedId : null);
+  }
+  function buildStampPicker() {
+    const picker = $("stamp-picker"), counts = {};
+    const entries = [[LETTER_BOAT, "Letter boat", null]].concat(core.figureList().map((f) => {
+      counts[f.kind] = (counts[f.kind] || 0) + 1;
+      return [f.id, `${f.kind === "boat" ? "Boat" : "Surfer"} ${counts[f.kind]}`, f.href];
+    }));
+    picker.innerHTML = "";
+    for (const [id, label, href] of entries) {
+      const b = document.createElement("button");
+      b.setAttribute("aria-label", label);
+      b.title = label;
+      b.setAttribute("aria-pressed", String(ui.stampFigure === id));
+      if (href) { const img = document.createElement("img"); img.src = href; img.alt = ""; b.appendChild(img); } else b.textContent = "⛵";
+      b.addEventListener("click", () => {
+        ui.stampFigure = id;
+        for (const other of picker.children) other.setAttribute("aria-pressed", String(other === b));
+      });
+      picker.appendChild(b);
+    }
   }
   function addElement(el) {
     mutate((d) => d.drawing.elements.push(el));
@@ -1600,16 +1646,17 @@ globalThis.WaveCore = (() => {
       eraseAt(p);
     } else if (tool === "dot") {
       addElement({ id: newId(), type: "dot", transform: { x: p[0], y: p[1], s: 1, r: 0 }, radius: design.style.sea.spacingMm * 0.7 });
-    } else if (tool === "boat") {
-      const el = addElement({ id: newId(), type: "boat", mode: "solid", transform: { x: p[0], y: p[1], s: (H() * 0.18) / 113, r: 0 } });
-      setTool("select");
-      select(el.id);
+    } else if (tool === "stamp") { // stays active so several stamps can be placed in a row
+      const el = ui.stampFigure === LETTER_BOAT
+        ? addElement({ id: newId(), type: "boat", mode: "solid", transform: { x: p[0], y: p[1], s: (H() * 0.18) / 113, r: 0 } })
+        : addElement({ id: newId(), type: "stamp", figure: ui.stampFigure, mode: "riding", transform: { x: p[0], y: p[1], s: 1, r: null } });
+      select(el.id); // its mode and colours show up right away
     } else if (tool === "select") {
       const el = selected();
       const near = (q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < (e.pointerType === "mouse" ? 10 : 22) / k;
       const before = JSON.stringify(design);
       if (el && near(handles(el).rotate)) {
-        dragOp = { mode: "rotate", el, before, start: { ...el.transform }, a0: Math.atan2(p[1] - el.transform.y, p[0] - el.transform.x) };
+        dragOp = { mode: "rotate", el, before, start: { ...tf(el) }, a0: Math.atan2(p[1] - el.transform.y, p[0] - el.transform.x) };
       } else if (el && handles(el).corners.some(near)) {
         dragOp = { mode: "scale", el, before, start: { ...el.transform }, d0: Math.hypot(p[0] - el.transform.x, p[1] - el.transform.y) || 1 };
       } else {
@@ -1930,20 +1977,29 @@ globalThis.WaveCore = (() => {
       selectionRefreshers.push((current) => (input.value = get(current)));
       box.appendChild(wrap);
     };
-    if (el.type === "boat" || el.type === "shape" || el.type === "svg") {
+    const MODES = el.type === "stamp" ? [["riding", "Riding"], ["obstacle", "Obstacle"]]
+      : el.type === "boat" ? [["riding", "Riding"], ["solid", "Solid"], ["woven", "Woven"], ["filled", "Wave-filled"]]
+      : el.type === "shape" || el.type === "svg" ? [["solid", "Solid"], ["woven", "Woven"], ["filled", "Wave-filled"]] : [];
+    const TITLES = { riding: "On top of the waves with a wake", obstacle: "The waves part around it", solid: "Flat silhouette the waves flow around",
+      woven: "Outline becomes hidden wave strokes, like a letter", filled: "Filled with its own wave strokes in its colour" };
+    if (MODES.length) {
+      const fallback = MODES[0][0] === "riding" && el.type === "stamp" ? "riding" : "solid";
       const group = document.createElement("div");
       group.className = "segmented";
       group.setAttribute("role", "group");
-      group.setAttribute("aria-label", "Shape mode");
-      const buttons = [["solid", "Solid"], ["woven", "Woven"], ["filled", "Wave-filled"]].map(([mode, label]) => {
+      group.setAttribute("aria-label", el.type === "stamp" ? "Stamp mode" : "Shape mode");
+      const buttons = MODES.map(([mode, label]) => {
         const b = document.createElement("button");
         b.textContent = label;
-        b.title = { solid: "Flat silhouette the waves flow around", woven: "Outline becomes hidden wave strokes, like a letter", filled: "Filled with its own wave strokes in its colour" }[mode];
-        b.addEventListener("click", () => update((e) => (e.mode = mode)));
+        b.title = TITLES[mode];
+        b.addEventListener("click", () => {
+          const angle = tf(el).r; // an obstacle does not turn with the flow, so it keeps the angle it has now
+          update((e) => { e.mode = mode; if (mode !== "riding" && e.transform.r == null) e.transform.r = angle; });
+        });
         group.appendChild(b);
         return [mode, b];
       });
-      const show = (current) => buttons.forEach(([mode, b]) => b.setAttribute("aria-pressed", String((current.mode || "solid") === mode)));
+      const show = (current) => buttons.forEach(([mode, b]) => b.setAttribute("aria-pressed", String((current.mode || fallback) === mode)));
       show(el);
       selectionRefreshers.push(show);
       modes.appendChild(group);
@@ -1953,6 +2009,12 @@ globalThis.WaveCore = (() => {
       add("Hull", (e) => e.hullColor || "#96643c", (e, v) => (e.hullColor = v));
     } else if (el.type === "shape" || el.type === "svg") {
       add("Fill", (e) => e.color, (e, v) => (e.color = v));
+    } else if (el.type === "stamp") {
+      const follow = document.createElement("button");
+      follow.textContent = "Turn to the flow";
+      follow.title = "Forget the hand-set angle and follow the waves again";
+      follow.addEventListener("click", () => update((e) => { e.mode = "riding"; e.transform.r = null; }));
+      box.appendChild(follow);
     } else {
       box.innerHTML = `<span style="color:var(--muted)">${el.type === "dot" ? "Dot" : "Letter stroke"}: colour follows the letter emphasis.</span>`;
     }
@@ -2223,13 +2285,14 @@ globalThis.WaveCore = (() => {
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); }
     else if (!mod) {
-      const t = { v: "select", l: "stroke", e: "eraser", d: "dot", b: "boat", s: "shape" }[e.key.toLowerCase()];
+      const t = { v: "select", l: "stroke", e: "eraser", d: "dot", b: "stamp", s: "shape" }[e.key.toLowerCase()];
       if (t) setTool(t);
     }
   });
   // any edit in the panel clears the "Opened …" note
   document.querySelector(".panel").addEventListener("input", () => { statusNote = ""; }, true);
 
+  buildStampPicker();
   setTool("select");
   renderLibrary();
   refreshControls();

@@ -64,7 +64,8 @@ test("drawing with the letter tool adds a stroke to the exported design", async 
 
 test("a placed boat can be moved, and undo puts it back", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Boat", exact: true }).click();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  await page.getByRole("button", { name: "Letter boat", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.5, 0.5)));
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await drag(page, [0.5, 0.5], [0.7, 0.5]);
@@ -122,7 +123,8 @@ test("clicking an element selects it so it can be deleted", async () => {
 
 test("a selection colour picker keeps working across repeated changes", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Boat", exact: true }).click();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  await page.getByRole("button", { name: "Letter boat", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.5, 0.5)));
   const sail = await page.getByLabel("Sail").elementHandle(); // the same input a user keeps dragging in
   await sail.fill("#ff0000");
@@ -199,7 +201,8 @@ test("a style exported from the library applies to another drawing", async () =>
 
 test("a selected shape can be switched to woven", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Boat", exact: true }).click();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  await page.getByRole("button", { name: "Letter boat", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.5, 0.5)));
   await page.getByRole("button", { name: "Woven", exact: true }).click();
   assert.strictEqual((await exportedDesign(page)).drawing.elements[0].mode, "woven");
@@ -416,5 +419,30 @@ test("surfer pictures show up on the canvas where the exported SVG places them",
   let shown = 0;
   for (const [fx, fy] of placed) if ((await warmPixels(fx, fy)) > 10) shown++;
   assert.strictEqual(shown, placed.length, `${shown} of ${placed.length} surfers visible`);
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("the stamp tool places a picture that follows the flow, and it can become an obstacle keeping its angle", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  await page.getByRole("button", { name: "Boat 1", exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.7, 0.3)));
+  await page.mouse.click(...(await at(page, 0.3, 0.75)));
+
+  let d = await exportedDesign(page);
+  const stamps = d.drawing.elements.filter((e) => e.type === "stamp");
+  assert.strictEqual(stamps.length, 2, "stamping twice places two pictures");
+  assert.strictEqual(stamps[0].figure, core.figure(stamps[0].figure).id);
+  assert.strictEqual(core.figure(stamps[0].figure).kind, "boat");
+  assert.strictEqual(stamps[0].mode, "riding");
+  assert.strictEqual(stamps[0].transform.r, null, "a new stamp follows the flow");
+
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.7, 0.3)));
+  await page.getByRole("button", { name: "Obstacle", exact: true }).click();
+  d = await exportedDesign(page);
+  const [first] = d.drawing.elements.filter((e) => e.type === "stamp");
+  assert.strictEqual(first.mode, "obstacle");
+  assert.strictEqual(typeof first.transform.r, "number", "switching to obstacle keeps the angle it had");
   assert.deepStrictEqual(page.errors, []);
 });
