@@ -346,3 +346,36 @@ test("smoothing straightens a jagged letter stroke without moving its ends", () 
   const [first, last] = [smooth[0], smooth[smooth.length - 1]];
   assert.ok(Math.hypot(first[0] - 50, first[1] - 117) < 0.5 && Math.hypot(last[0] - 140, last[1] - 117) < 0.5, `ends ${first} ${last}`);
 });
+
+const lineLength = (l) => l.slice(1).reduce((s, p, i) => s + Math.hypot(p[0] - l[i][0], p[1] - l[i][1]), 0);
+
+test("continuous bands run much longer than dashes", () => {
+  const d = design();
+  d.style.sea.turbulence = 0.3;
+  const mean = (lines) => lines.reduce((s, l) => s + lineLength(l), 0) / lines.length;
+  const dashes = core.generate(d, "full").streamlines;
+  d.style.sea.strokeType = "bands";
+  const bands = core.generate(d, "full").streamlines;
+  assert.ok(mean(bands) > 3 * mean(dashes), `bands ${mean(bands).toFixed(0)} mm vs dashes ${mean(dashes).toFixed(0)} mm`);
+});
+
+// Width along a ribbon polygon (left side then right side reversed), over its middle 60%.
+function middleWidths(poly) {
+  const n = poly.length / 2, widths = [];
+  for (let i = Math.floor(n * 0.2); i < Math.ceil(n * 0.8); i++) widths.push(Math.hypot(poly[i][0] - poly[2 * n - 1 - i][0], poly[i][1] - poly[2 * n - 1 - i][1]));
+  return widths;
+}
+
+test("bands swell and pinch along their length when swell is on", () => {
+  const d = design();
+  d.style.sea.turbulence = 0.2;
+  d.style.sea.strokeType = "bands";
+  const ratio = (swell) => {
+    d.style.sea.swell = swell;
+    const longest = core.generate(d, "full").ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length)[0];
+    const w = middleWidths(longest.points);
+    return Math.max(...w) / Math.min(...w);
+  };
+  assert.ok(ratio(0) < 1.3, `steady band varies ${ratio(0)}`);
+  assert.ok(ratio(1) > 2, `swelling band only varies ${ratio(1)}`);
+});

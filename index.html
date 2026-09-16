@@ -232,14 +232,15 @@ globalThis.WaveCore = (() => {
   }
 
   // Flow presets set the sea's shape (never seed or spacing) and, where it defines the look, the variety.
-  const FLOW_DEFAULTS = { tilt: 0, turbulence: 0.35, scale: 220, length: 90, width: 0.6, taper: 0.5, vortices: 0, gradient: 0, rings: 0, fold: 0 };
+  const FLOW_DEFAULTS = { tilt: 0, turbulence: 0.35, scale: 220, length: 90, width: 0.6, taper: 0.5, vortices: 0, gradient: 0, rings: 0, fold: 0,
+    strokeType: "dashes", swell: 0.6 };
   const FLOW_PRESETS = {
     Calm: { sea: { turbulence: 0.25, scale: 260, length: 120 } },
     "Diagonal breeze": { sea: { tilt: -15, scale: 200 } },
     Stormy: { sea: { turbulence: 0.9, scale: 110, length: 70, width: 0.55, taper: 0.6 } },
     "Hokusai curls": { sea: { tilt: 5, turbulence: 1.5, scale: 70, length: 150, width: 0.65, taper: 0.8 } },
-    "Reference look": { sea: { tilt: -8, turbulence: 0.45, scale: 180, length: 130, width: 0.75, taper: 0.6 },
-      variety: { width: 0.7, spacing: 0.4, overlay: 0.4, accents: 0.2 } },
+    "Reference look": { sea: { tilt: -5, turbulence: 0.8, scale: 150, length: 130, width: 0.72, taper: 0.4, strokeType: "bands", swell: 0.45 },
+      variety: { width: 0.2, spacing: 0.2, overlay: 0.25, accents: 0.05 } },
     Ripples: { sea: { turbulence: 0.5, scale: 60, length: 35, width: 0.5, taper: 0.6 } },
     Whirlpool: { sea: { turbulence: 0.3, scale: 200, length: 160, vortices: 5 } },
     Undertow: { sea: { tilt: 10, turbulence: 0.7, scale: 160, length: 160, gradient: 0.9 } },
@@ -356,6 +357,8 @@ globalThis.WaveCore = (() => {
       next.sea.length = Math.round(clamp(jitter(next.sea.length, 0.3), 20, 400));
       next.sea.width = round(clamp(jitter(next.sea.width, 0.15), 0.2, 1));
       next.sea.taper = round(clamp(jitter(next.sea.taper, 0.2), 0, 1));
+      if (rng() < 0.35) next.sea.strokeType = "bands";
+      next.sea.swell = round(0.3 + 0.6 * rng());
       next.sea.seed = Math.floor(rng() * 1e6);
     }
     if (groups.colours) {
@@ -713,6 +716,18 @@ globalThis.WaveCore = (() => {
     }
     return left.concat(right.reverse());
   }
+  // Continuous band: tapers only near its ends and swells/pinches along its length with slow noise.
+  function bandProfile(line, dsep, sea, rng) {
+    let length = 0;
+    for (let i = 1; i < line.length; i++) length += Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]);
+    const taperLen = dsep * (0.5 + 3 * sea.taper), phase = rng() * 1000;
+    return (t) => {
+      const along = t * length;
+      const end = Math.pow(Math.max(0, Math.min(1, along / taperLen, (length - along) / taperLen)), 0.6);
+      const swell = Math.max(-1, Math.min(1, fbm(along / (dsep * 5) + phase, phase * 0.37, sea.seed) / 2.2));
+      return end * Math.max(0.12, 1 + sea.swell * 0.85 * swell);
+    };
+  }
   function brushProfile(taper) {
     const e = 0.05 + taper * 0.9;
     return (t) => Math.pow(Math.sin(Math.PI * t), e) * (1 - 0.35 * t);
@@ -954,7 +969,8 @@ globalThis.WaveCore = (() => {
       }
     }
 
-    const lines = streamlines(W, H, field, packer, seeds, spacingAt, step, sea.length, rng, inBorder);
+    const bands = sea.strokeType === "bands"; // bands run as far as the flow and neighbours allow
+    const lines = streamlines(W, H, field, packer, seeds, spacingAt, step, bands ? 4 * (W + H) : sea.length, rng, inBorder);
 
     const profile = brushProfile(sea.taper);
     const ribbons = [];
@@ -965,7 +981,7 @@ globalThis.WaveCore = (() => {
       const factor = (0.65 + 0.35 * r) * (1 - variety.width) + (0.12 + 1.3 * Math.pow(r, 1.5)) * variety.width;
       const width = spacingAt(mid[0], mid[1]) * sea.width * factor;
       const { color, cutout } = pickStroke(style.palette, rng, true);
-      const poly = ribbon(line, width, profile, dsep / 4);
+      const poly = ribbon(line, width, bands ? bandProfile(line, dsep, sea, rng) : profile, dsep / 4);
       if (poly) ribbons.push({ points: poly, color, kind: "sea", width, cutout });
     }
     // overlay: a sparser second layer that may cross the sea but not letters or obstacles
@@ -977,11 +993,11 @@ globalThis.WaveCore = (() => {
       for (const [pts, r] of blockers) opacker.add(pts, r);
       const oSpacing = () => osep;
       oSpacing.base = osep;
-      overlayLines = streamlines(W, H, field, opacker, [], oSpacing, step, sea.length * 1.3, orng, inBorder)
+      overlayLines = streamlines(W, H, field, opacker, [], oSpacing, step, bands ? 4 * (W + H) : sea.length * 1.3, orng, inBorder)
         .filter(() => orng() < variety.overlay);
       for (const line of overlayLines) {
         const width = dsep * sea.width * 0.45 * (0.6 + 0.4 * orng());
-        const poly = ribbon(line, width, profile, dsep / 4);
+        const poly = ribbon(line, width, bands ? bandProfile(line, dsep, sea, orng) : profile, dsep / 4);
         const { color, cutout } = pickStroke(style.palette, orng, true);
         if (poly) ribbons.push({ points: poly, color, kind: "overlay", width, cutout });
       }
@@ -1568,8 +1584,18 @@ globalThis.WaveCore = (() => {
   slider(flow, { label: "Tilt", min: -90, max: 90, step: 1, fmt: (v) => v + "°", get: (s) => s.sea.tilt, set: (s, v) => (s.sea.tilt = v) });
   slider(flow, { label: "Turbulence", min: 0, max: 2, step: 0.05, get: (s) => s.sea.turbulence, set: (s, v) => (s.sea.turbulence = v) });
   slider(flow, { label: "Swell size", min: 30, max: 500, step: 5, fmt: mm, get: (s) => s.sea.scale, set: (s, v) => (s.sea.scale = v) });
+  (() => {
+    const wrap = document.createElement("label");
+    wrap.className = "field";
+    wrap.innerHTML = `<span>Stroke type</span><select><option value="dashes">Dashes (short brush strokes)</option><option value="bands">Continuous bands</option></select>`;
+    const sel = wrap.querySelector("select");
+    sel.addEventListener("change", () => mutate((d) => (d.style.sea.strokeType = sel.value)));
+    refreshers.push(() => (sel.value = design.style.sea.strokeType));
+    flow.appendChild(wrap);
+  })();
+  slider(flow, { label: "Thickness swell (bands)", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.sea.swell, set: (s, v) => (s.sea.swell = v) });
   slider(flow, { label: "Stroke width", min: 0.2, max: 1, step: 0.05, fmt: pct, get: (s) => s.sea.width, set: (s, v) => (s.sea.width = v) });
-  slider(flow, { label: "Stroke length", min: 20, max: 400, step: 5, fmt: mm, get: (s) => s.sea.length, set: (s, v) => (s.sea.length = v) });
+  slider(flow, { label: "Stroke length (dashes)", min: 20, max: 400, step: 5, fmt: mm, get: (s) => s.sea.length, set: (s, v) => (s.sea.length = v) });
   slider(flow, { label: "Taper", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.sea.taper, set: (s, v) => (s.sea.taper = v) });
   slider(flow, { label: "Whirlpools", min: 0, max: 8, step: 1, get: (s) => s.sea.vortices, set: (s, v) => (s.sea.vortices = v) });
   slider(flow, { label: "Calm → rough (top to bottom)", min: -1, max: 1, step: 0.05, get: (s) => s.sea.gradient, set: (s, v) => (s.sea.gradient = v) });
