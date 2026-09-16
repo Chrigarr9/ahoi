@@ -774,3 +774,15 @@ test("removing a palette colour keeps the colour of visible paint that used it o
   assert.deepStrictEqual(JSON.parse(JSON.stringify(shifted.color)), { palette: 1 }, "a later colour keeps following its palette slot");
   assert.strictEqual(d.style.palette.strokes[1].color, before[2]);
 });
+
+test("the edge fade sliders set how strokes fade out towards the border", async () => {
+  const page = await openTool();
+  await page.getByText("Edges", { exact: true }).click();
+  await page.getByLabel("Wavy border").check();
+  for (const [name, value] of [["Fade width", "50"], ["Fade: shorter", "0.6"], ["Fade: thinner", "0.3"], ["Fade: fewer", "0.8"]]) {
+    await page.getByRole("slider", { name, exact: true }).fill(value);
+  }
+  const { edges } = (await exportedDesign(page)).style;
+  assert.deepStrictEqual([edges.enabled, edges.fadeWidth, edges.fadeShorter, edges.fadeThinner, edges.fadeSparser], [true, 50, 0.6, 0.3, 0.8]);
+  assert.deepStrictEqual(page.errors, []);
+});

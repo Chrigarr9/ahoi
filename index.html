@@ -252,6 +252,7 @@
           <label class="check"><input type="checkbox" id="edge-bottom">Bottom</label>
           <label class="check"><input type="checkbox" id="edge-left">Left</label>
         </div>
+        <div id="edge-fade-controls"></div>
       </details>
       <details>
         <summary>Style library</summary>
@@ -399,7 +400,8 @@ globalThis.WaveCore = (() => {
         transparent: "background", // null | "background" | index into strokes
       },
       letters: { emphasis: 0.3, bend: 0.4, smooth: 0 },
-      edges: { enabled: false, inset: 25, amplitude: 12, top: true, right: true, bottom: true, left: true },
+      // fade: within fadeWidth mm of the border, sea strokes get shorter, thinner and fewer (0 = none .. 1 = strongest)
+      edges: { enabled: false, inset: 25, amplitude: 12, top: true, right: true, bottom: true, left: true, fadeWidth: 30, fadeShorter: 0, fadeThinner: 0, fadeSparser: 0 },
     };
   }
   // Estimated garment measurements (flat back width, collar to hem) until a real jersey is measured
@@ -1133,7 +1135,7 @@ globalThis.WaveCore = (() => {
         if (f[i] >= 1) { flush(); continue; }
         if (gap > 0) { gap -= step; continue; }
         run.push(line[i]); runFade.push(f[i]);
-        if (fade.shorter && (run.length - 1) * step >= total * (1 - 0.85 * fade.shorter * f[i])) {
+        if (fade.shorter && (run.length - 1) * step >= Math.max(1.25 * dsep, total * (1 - fade.shorter * f[i]) ** 2)) {
           flush();
           gap = dsep * 0.6 * fade.shorter * f[i];
         }
@@ -2347,6 +2349,11 @@ globalThis.WaveCore = (() => {
   const edges = $("edge-controls");
   slider(edges, { label: "Border inset", min: 0, max: 80, step: 1, fmt: mm, get: (s) => s.edges.inset, set: (s, v) => (s.edges.inset = v) });
   slider(edges, { label: "Border waviness", min: 0, max: 40, step: 1, fmt: mm, get: (s) => s.edges.amplitude, set: (s, v) => (s.edges.amplitude = v) });
+  const edgeFade = $("edge-fade-controls");
+  slider(edgeFade, { label: "Fade width", min: 0, max: 120, step: 1, fmt: mm, get: (s) => s.edges.fadeWidth, set: (s, v) => (s.edges.fadeWidth = v) });
+  slider(edgeFade, { label: "Fade: shorter", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.edges.fadeShorter, set: (s, v) => (s.edges.fadeShorter = v) });
+  slider(edgeFade, { label: "Fade: thinner", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.edges.fadeThinner, set: (s, v) => (s.edges.fadeThinner = v) });
+  slider(edgeFade, { label: "Fade: fewer", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.edges.fadeSparser, set: (s, v) => (s.edges.fadeSparser = v) });
 
   const BRUSHES = [["round", "Round", "Even width with round ends"], ["tapered", "Tapered", "Thin at both ends, like a paintbrush"],
     ["calligraphy", "Calligraphy", "A flat nib: thick across it, thin along it"]];

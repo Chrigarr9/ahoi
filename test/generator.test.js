@@ -365,16 +365,19 @@ test("a wavy border keeps the sea inside the enabled sides only", () => {
   assert.ok(Math.max(...tops) - Math.min(...tops) > 3, `border tops ${tops}`);
 });
 
-test("moving the border leaves every sea and overlay stroke away from it exactly as it was", () => {
+test("moving the border leaves every sea stroke, overlay stroke and accent away from it exactly as it was", () => {
   const withBorder = (inset) => {
     const d = design();
-    d.style.variety = { ...d.style.variety, width: 0.5, overlay: 0.5 };
+    d.style.variety = { ...d.style.variety, width: 0.5, overlay: 0.5, accents: 0.5 };
     d.style.edges = { ...d.style.edges, enabled: true, inset, amplitude: 5, top: true, right: false, bottom: false, left: true };
     return core.generate(d);
   };
   const near = 30 + 5 + 8 * 4; // outer border line + waviness + a few spacings
-  const interior = (out) => new Set(out.ribbons.filter((r) => (r.kind === "sea" || r.kind === "overlay") && r.points.every(([x, y]) => x > near && y > near))
-    .map((r) => JSON.stringify([r.kind, r.color, r.width, r.points])));
+  const away = (pts) => pts.every(([x, y]) => x > near && y > near);
+  const interior = (out) => new Set([
+    ...out.ribbons.filter((r) => ["sea", "overlay", "accent"].includes(r.kind) && away(r.points)).map((r) => JSON.stringify([r.kind, r.color, r.width, r.points])),
+    ...out.fills.filter((f) => f.kind === "accent" && away(f.rings[0])).map((f) => JSON.stringify([f.color, f.rings])),
+  ]);
   const a = interior(withBorder(20)), b = interior(withBorder(30));
   assert.ok(a.size > 40, `only ${a.size} interior strokes`);
   assert.deepStrictEqual([...b].filter((r) => !a.has(r)), []);
@@ -390,6 +393,46 @@ test("scattered surfers and their wakes stay inside the border", () => {
   assert.ok(out.figures.length > 0, "no surfers placed");
   assert.ok(out.figures.every((f) => inside([f.x, f.y])), "surfer outside the border");
   assert.ok(out.ribbons.filter((r) => r.kind === "wake").every((r) => r.points.every(([x, y]) => inside([x, y]) || Math.min(x - 41, y - 41, 159 - x, 209 - y) > -3)), "wake outside the border");
+});
+
+test("after a stroke-length change most of the canvas keeps its sea colour", () => {
+  const colours = (length) => {
+    const d = design();
+    d.style.sea.length = length;
+    d.style.palette.transparent = null;
+    d.style.palette.strokes = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"].map((color) => ({ color, weight: 1 }));
+    const at = new Map(); // colour per 4 mm cell
+    for (const r of core.generate(d).ribbons.filter((r) => r.kind === "sea")) for (const [x, y] of r.points) at.set(`${Math.floor(x / 4)},${Math.floor(y / 4)}`, r.color);
+    return at;
+  };
+  const before = colours(90), after = colours(95);
+  const shared = [...after.keys()].filter((k) => before.has(k));
+  const same = shared.filter((k) => before.get(k) === after.get(k)).length / shared.length;
+  assert.ok(same > 0.4, `only ${Math.round(same * 100)}% kept its colour (a random reshuffle keeps 25%)`);
+});
+
+test("edge fade makes sea strokes near the border shorter, thinner and fewer, each on its own slider", () => {
+  // straight border 20 mm in on the left and top; the fade reaches 40 mm further in
+  const zone = ([x, y]) => x < 40 || y < 40; // the outer half of the fade
+  const measure = (knobs) => {
+    const d = design();
+    d.style.sea.turbulence = 0.6;
+    d.style.edges = { ...d.style.edges, enabled: true, inset: 20, amplitude: 0, top: true, left: true, right: false, bottom: false, fadeWidth: 40, ...knobs };
+    const out = core.generate(d);
+    const pieces = out.streamlines.filter((l) => zone(l[l.length >> 1]));
+    const length = pieces.reduce((s, l) => s + lineLength(l), 0);
+    const outer = out.ribbons.filter((r) => r.kind === "sea" && r.points.every(zone)).map((r) => r.points);
+    const loop = (pts, f) => pts.reduce((a, p, i) => a + f(p, pts[(i + 1) % pts.length]), 0);
+    const area = outer.reduce((a, pts) => a + Math.abs(loop(pts, (p, q) => (p[0] * q[1] - q[0] * p[1]) / 2)), 0);
+    const perimeter = outer.reduce((a, pts) => a + loop(pts, (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1])), 0);
+    return { meanLength: length / pieces.length, length, thickness: (2 * area) / perimeter }; // mean width of the outer strokes
+  };
+  const plain = measure({});
+  const shorter = measure({ fadeShorter: 1 }), thinner = measure({ fadeThinner: 1 }), sparser = measure({ fadeSparser: 1 });
+  assert.ok(shorter.meanLength < 0.6 * plain.meanLength, `shorter: ${shorter.meanLength} vs ${plain.meanLength} mm`);
+  assert.ok(thinner.thickness < 0.75 * plain.thickness, `thinner: ${thinner.thickness} vs ${plain.thickness} mm`);
+  assert.ok(sparser.length < 0.7 * plain.length, `sparser: ${sparser.length} vs ${plain.length} mm of strokes`);
+  assert.ok(Math.abs(thinner.length - plain.length) < 1e-6, "thinner alone keeps every stroke");
 });
 
 // Direction samples of streamline segments: [x, y, dx, dy]
