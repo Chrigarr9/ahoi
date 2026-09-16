@@ -146,3 +146,135 @@ test("reset starts a fresh default design, and undo brings the old one back", as
   assert.strictEqual(restored.style.sea.seed, 42);
   assert.strictEqual(restored.drawing.elements.length, 1);
 });
+
+test("the eraser cuts a letter stroke in two", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
+  await page.getByRole("button", { name: "Eraser", exact: true }).click();
+  await drag(page, [0.5, 0.45], [0.5, 0.55], 10);
+
+  const strokes = (await exportedDesign(page)).drawing.elements.filter((e) => e.type === "stroke");
+  assert.strictEqual(strokes.length, 2);
+  const xs = strokes.map((s) => worldPoints(s).map((p) => p[0] / 500));
+  assert.ok(xs.some((x) => Math.max(...x) < 0.5) && xs.some((x) => Math.min(...x) > 0.5), "one piece left, one right of the cut");
+});
+
+test("Surprise me changes only the ticked style groups, keeps the drawing, and history jumps back", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await drag(page, [0.3, 0.3], [0.3, 0.6]);
+  const before = await exportedDesign(page);
+
+  await page.getByLabel("Colours", { exact: true }).uncheck();
+  await page.getByRole("button", { name: "🎲 Surprise me" }).click();
+  const first = await exportedDesign(page);
+  assert.deepStrictEqual(first.drawing, before.drawing);
+  assert.deepStrictEqual(first.style.palette, before.style.palette, "colours were not ticked");
+  assert.notDeepStrictEqual(first.style.sea, before.style.sea);
+
+  await page.getByRole("button", { name: "🎲 Surprise me" }).click();
+  await page.getByRole("button", { name: "Use look 1" }).click();
+  assert.deepStrictEqual((await exportedDesign(page)).style, first.style);
+});
+
+test("a style exported from the library applies to another drawing", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "🎲 Surprise me" }).click();
+  const styled = await exportedDesign(page);
+  await page.getByRole("button", { name: "★ Save current style" }).click();
+  await page.getByText("Style library", { exact: true }).click();
+  const [file] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: /^Export style/ }).first().click()]);
+  const styleJson = fs.readFileSync(await file.path());
+
+  const other = await openTool();
+  await other.getByRole("button", { name: "Dot", exact: true }).click();
+  await other.mouse.click(...(await at(other, 0.5, 0.5)));
+  await other.locator("#import-style").setInputFiles({ name: "look.json", mimeType: "application/json", buffer: styleJson });
+  await other.getByRole("status").filter({ hasText: /applied style/i }).waitFor();
+  const applied = await exportedDesign(other);
+  assert.deepStrictEqual(applied.style, styled.style);
+  assert.strictEqual(applied.drawing.elements[0].type, "dot");
+});
+
+test("a selected shape can be switched to woven", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Boat", exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.5, 0.5)));
+  await page.getByRole("button", { name: "Woven", exact: true }).click();
+  assert.strictEqual((await exportedDesign(page)).drawing.elements[0].mode, "woven");
+});
+
+// Chromium DevTools input: real pen and multi-touch pointer events
+async function penDrag(page, from, to) {
+  const cdp = await page.context().newCDPSession(page);
+  const [x0, y0] = await at(page, ...from), [x1, y1] = await at(page, ...to);
+  const send = (type, x, y, buttons) => cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, pointerType: "pen", clickCount: 1 });
+  await send("mousePressed", x0, y0, 1);
+  for (let i = 1; i <= 10; i++) await send("mouseMoved", x0 + ((x1 - x0) * i) / 10, y0 + ((y1 - y0) * i) / 10, 1);
+  await send("mouseReleased", x1, y1, 0);
+}
+async function touch(page, frames) {
+  const cdp = await page.context().newCDPSession(page);
+  const [first, ...rest] = frames;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: first.map(([x, y], id) => ({ x, y, id })) });
+  for (const f of rest) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: f.map(([x, y], id) => ({ x, y, id })) });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
+
+test("a pen draws, while a finger pans and two fingers zoom instead of drawing", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await penDrag(page, [0.3, 0.3], [0.3, 0.6]);
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1, "pen stroke");
+
+  const box0 = await page.locator("#stage").boundingBox();
+  const [cx, cy] = [box0.x + box0.width / 2, box0.y + box0.height / 2];
+  await touch(page, Array.from({ length: 8 }, (_, i) => [[cx + i * 10, cy]]));
+  const box1 = await page.locator("#stage").boundingBox();
+  assert.ok(Math.abs(box1.x - box0.x - 70) < 5, `one finger pans (moved ${box1.x - box0.x})`);
+
+  await touch(page, Array.from({ length: 8 }, (_, i) => [[cx - 20 - i * 15, cy], [cx + 20 + i * 15, cy]]));
+  const box2 = await page.locator("#stage").boundingBox();
+  assert.ok(box2.width > box1.width * 1.5, `two fingers zoom (${box1.width} -> ${box2.width})`);
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1, "fingers did not draw");
+});
+
+const pixelAt = (page, fx, fy) => page.evaluate(([fx, fy]) => {
+  const c = document.getElementById("stage");
+  return [...c.getContext("2d").getImageData(Math.floor(fx * c.width), Math.floor(fy * c.height), 1, 1).data];
+}, [fx, fy]);
+
+test("letter view shows the painted letters on plain paper without the sea", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await drag(page, [0.5, 0.2], [0.5, 0.8], 20);
+  await page.getByRole("button", { name: "Letter view" }).click();
+  assert.deepStrictEqual(await pixelAt(page, 0.2, 0.5), [250, 248, 242, 255], "paper, no waves");
+  assert.deepStrictEqual(await pixelAt(page, 0.5, 0.5), [29, 39, 51, 255], "the painted stroke");
+});
+
+test("a transparent background exports a PNG with transparent pixels", async () => {
+  const page = await openTool();
+  await page.getByLabel("Width (cm)").fill("10");
+  await page.getByLabel("Width (cm)").press("Enter");
+  await page.getByLabel("Height (cm)").fill("10");
+  await page.getByLabel("Height (cm)").press("Enter");
+  await page.locator("summary", { hasText: "Colours" }).click();
+  await page.getByLabel("Transparent colour").selectOption("background");
+  await page.locator("summary", { hasText: "Edges" }).click();
+  await page.getByLabel("Wavy border").check(); // keeps the corner free of strokes
+  const png = await download(page, "Export PNG");
+
+  // first pixel of the first scanline: every PNG filter leaves it unchanged
+  const zlib = require("node:zlib");
+  const chunks = [];
+  for (let o = 8; o < png.length;) {
+    const len = png.readUInt32BE(o), type = png.toString("ascii", o + 4, o + 8);
+    if (type === "IDAT") chunks.push(png.subarray(o + 8, o + 8 + len));
+    o += 12 + len;
+  }
+  const raw = zlib.inflateSync(Buffer.concat(chunks));
+  assert.strictEqual(png[25], 6, "RGBA colour type");
+  assert.strictEqual(raw[4], 0, "corner pixel alpha");
+});
