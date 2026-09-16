@@ -555,3 +555,90 @@ test("strokes painted before brushes existed generate exactly like hidden, taper
   assert.strictEqual(JSON.stringify(core.generate(explicit)), JSON.stringify(core.generate(old)));
   assert.strictEqual(core.generate(old).ribbons.filter((r) => r.kind === "letter").length, 2);
 });
+
+// widest extent of a paint outline across a line through (x, y) perpendicular to `dir` ("x" or "y")
+const thickness = (ring, dir, at) => {
+  const near = ring.filter((p) => Math.abs(p[dir === "x" ? 0 : 1] - at) < 1.5).map((p) => p[dir === "x" ? 1 : 0]);
+  return Math.max(...near) - Math.min(...near);
+};
+
+test("a calligraphy stroke is thick across the nib and thin along it", () => {
+  const d = design();
+  const nib = { brush: "calligraphy", size: 16, mode: "visible", nib: 0 };
+  d.drawing.elements = [
+    { id: "h", type: "stroke", transform: { ...identity }, points: Array.from({ length: 21 }, (_, i) => [40 + i * 4, 60]), ...nib },
+    { id: "v", type: "stroke", transform: { ...identity }, points: Array.from({ length: 21 }, (_, i) => [150, 100 + i * 4]), ...nib },
+  ];
+  const [h, v] = core.generate(d).ribbons.filter((r) => r.kind === "paint").map((r) => r.points);
+  // a horizontal nib (0°): a horizontal stroke runs along it, a vertical one across it
+  assert.ok(thickness(h, "x", 80) < 16 * 0.2, `horizontal stroke ${thickness(h, "x", 80)} mm thick`);
+  assert.ok(Math.abs(thickness(v, "y", 140) - 16) < 0.5, `vertical stroke ${thickness(v, "y", 140)} mm thick`);
+
+  for (const el of d.drawing.elements) el.nib = 90; // turning the nib swaps them
+  const [h2, v2] = core.generate(d).ribbons.filter((r) => r.kind === "paint").map((r) => r.points);
+  assert.ok(Math.abs(thickness(h2, "x", 80) - 16) < 0.5 && thickness(v2, "y", 140) < 16 * 0.2, `nib 90°: ${thickness(h2, "x", 80)} / ${thickness(v2, "y", 140)}`);
+});
+
+test("pen pressure scales a stroke's width along its length", () => {
+  const d = design();
+  // pressed lightly at the top and hard at the bottom
+  const points = Array.from({ length: 21 }, (_, i) => [100, 40 + i * 8]);
+  d.drawing.elements = [{ id: "p", type: "stroke", transform: { ...identity }, points, brush: "round", size: 20, mode: "visible",
+    pressure: points.map((_, i) => i / 20) }];
+  const [ring] = core.generate(d).ribbons.filter((r) => r.kind === "paint").map((r) => r.points);
+  const light = thickness(ring, "y", 60), hard = thickness(ring, "y", 180);
+  assert.ok(hard > 16 && light < 8 && light > 2, `light end ${light} mm, hard end ${hard} mm`);
+
+  delete d.drawing.elements[0].pressure; // no pressure: the full brush size all along
+  const [even] = core.generate(d).ribbons.filter((r) => r.kind === "paint").map((r) => r.points);
+  assert.ok(Math.abs(thickness(even, "y", 60) - 20) < 0.5, `without pressure ${thickness(even, "y", 60)} mm`);
+});
+
+test("paint in a palette colour follows palette changes, while a custom colour stays", () => {
+  const d = design();
+  const along = (x) => Array.from({ length: 21 }, (_, i) => [x, 40 + i * 8]);
+  d.drawing.elements = [
+    { id: "slot", type: "stroke", transform: { ...identity }, points: along(50), brush: "round", size: 10, mode: "visible", color: { palette: 1 } },
+    { id: "letter", type: "stroke", transform: { ...identity }, points: along(100), brush: "round", size: 10, mode: "visible", color: { palette: "letter" } },
+    { id: "own", type: "stroke", transform: { ...identity }, points: along(150), brush: "round", size: 10, mode: "visible", color: "#123abc" },
+  ];
+  const colours = () => [...core.generate(d).ribbons.filter((r) => r.kind === "paint").map((r) => r.color)]; // an array of this realm
+  d.style.palette.strokes[1].color = "#00aa00";
+  d.style.palette.letter = "#aa0000";
+  assert.deepStrictEqual(colours(), ["#00aa00", "#aa0000", "#123abc"]);
+  d.style.palette.strokes[1].color = "#0000aa";
+  d.style.palette.letter = "#aaaa00";
+  assert.deepStrictEqual(colours(), ["#0000aa", "#aaaa00", "#123abc"]);
+});
+
+test("a tap paints a round dot the size of the brush that the waves keep clear of", () => {
+  const d = design();
+  const spacing = d.style.sea.spacingMm;
+  d.drawing.elements = [{ id: "t", type: "stroke", transform: { x: 100, y: 120, s: 1, r: 0 }, points: [[0, 0]], brush: "tapered", size: 18, mode: "visible", color: "#ff8800" }];
+  const out = core.generate(d);
+  const [dot] = out.ribbons.filter((r) => r.kind === "paint");
+  assert.ok(dot, "no dot painted");
+  const radii = dot.points.map(([x, y]) => Math.hypot(x - 100, y - 120));
+  assert.ok(Math.min(...radii) > 8.9 && Math.max(...radii) < 9.1, `dot radius ${Math.min(...radii)}..${Math.max(...radii)}`);
+  const nearest = Math.min(...out.streamlines.flat().map(([x, y]) => Math.hypot(x - 100, y - 120)));
+  assert.ok(nearest >= 9 + spacing / 2, `a wave comes within ${nearest} mm of the dot's centre`);
+});
+
+test("erasing through a pressure stroke keeps the pressure and brush on both pieces", () => {
+  const points = Array.from({ length: 21 }, (_, i) => [40 + i * 6, 100]); // x 40..160
+  const el = { id: "p", type: "stroke", transform: { ...identity }, points, brush: "calligraphy", size: 14, mode: "visible", color: { palette: 2 }, nib: 30,
+    pressure: points.map(([x]) => (x - 40) / 120) };
+  let n = 0;
+  const { elements } = core.eraseStrokes([el], 100, 100, 5, () => "new" + n++);
+  assert.strictEqual(elements.length, 2);
+  for (const piece of elements) {
+    assert.deepStrictEqual({ ...piece, id: 0, transform: 0, points: 0, pressure: 0 },
+      { id: 0, type: "stroke", transform: 0, points: 0, pressure: 0, brush: "calligraphy", size: 14, mode: "visible", color: { palette: 2 }, nib: 30 });
+    assert.strictEqual(piece.pressure.length, piece.points.length);
+    // pressure still grows with x: at every point it matches where that point lies on the original stroke
+    piece.points.forEach((p, i) => {
+      const [x] = core.applyTransform(piece.transform, p);
+      assert.ok(Math.abs(piece.pressure[i] - (x - 40) / 120) < 0.01, `pressure ${piece.pressure[i]} at x ${x}`);
+    });
+  }
+});

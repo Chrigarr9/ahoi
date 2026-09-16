@@ -134,3 +134,14 @@ test("jersey size, colour and print position survive export and reopen", () => {
   const plain = (o) => JSON.parse(JSON.stringify(o));
   assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 });
 });
+
+test("brush, size, mode, colour, nib and pen pressure of painted strokes survive export and reopen", () => {
+  const d = sampleDesign();
+  d.drawing.elements.push(
+    { id: "c", type: "stroke", transform: { x: 60, y: 60, s: 1, r: 0 }, points: [[0, 0], [20, 10], [40, 0]], brush: "calligraphy", size: 12, mode: "visible",
+      color: { palette: 1 }, nib: 60, pressure: [0.2, 0.9, 0.5] },
+    { id: "t", type: "stroke", transform: { x: 150, y: 40, s: 1, r: 0 }, points: [[0, 0]], brush: "round", size: 8, mode: "visible", color: "#aa3300" });
+  const svg = core.exportSVG(d, core.generate(d));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg)).drawing.elements, plain(d.drawing.elements));
+});

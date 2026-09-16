@@ -522,22 +522,35 @@ globalThis.WaveCore = (() => {
     const out = [];
     for (const el of elements) {
       if (el.type !== "stroke") { out.push(el); continue; }
-      // add points between the original ones (never replace them) so cuts are precise and untouched parts keep their shape
-      const world = [];
+      // add points between the original ones (never replace them) so cuts are precise and untouched parts keep their shape;
+      // pen pressure is interpolated along with them
+      const world = [], pressure = [], pressed = Array.isArray(el.pressure) && el.pressure.length === el.points.length;
       el.points.map((p) => applyTransform(el.transform, p)).forEach((p, i, all) => {
-        if (i === 0) return world.push(p);
+        if (i === 0) { world.push(p); if (pressed) pressure.push(el.pressure[0]); return; }
         const a = all[i - 1], n = Math.max(1, Math.ceil(Math.hypot(p[0] - a[0], p[1] - a[1]) / (radius / 3)));
-        for (let j = 1; j <= n; j++) world.push([a[0] + ((p[0] - a[0]) * j) / n, a[1] + ((p[1] - a[1]) * j) / n]);
+        for (let j = 1; j <= n; j++) {
+          world.push([a[0] + ((p[0] - a[0]) * j) / n, a[1] + ((p[1] - a[1]) * j) / n]);
+          if (pressed) pressure.push(el.pressure[i - 1] + ((el.pressure[i] - el.pressure[i - 1]) * j) / n);
+        }
       });
       const keep = world.map(([px, py]) => Math.hypot(px - x, py - y) > radius);
       if (keep.every(Boolean)) { out.push(el); continue; }
       changed = true;
-      let run = [], first = true;
+      // the pieces keep the stroke's brush, size, mode and colour
+      const { id, transform, points, pressure: _, ...brush } = el;
+      let run = [], runPressure = [], first = true;
       const flush = () => {
-        if (run.length >= 2) { out.push({ id: first ? el.id : newId(), type: "stroke", ...centred(run) }); first = false; }
-        run = [];
+        if (run.length >= 2) {
+          out.push({ ...brush, id: first ? id : newId(), ...centred(run), ...(pressed ? { pressure: runPressure } : {}) });
+          first = false;
+        }
+        run = []; runPressure = [];
       };
-      world.forEach((p, i) => (keep[i] ? run.push(p) : flush()));
+      world.forEach((p, i) => {
+        if (!keep[i]) return flush();
+        run.push(p);
+        if (pressed) runPressure.push(Math.round(pressure[i] * 1000) / 1000);
+      });
       flush();
     }
     return { elements: out, changed };
