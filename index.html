@@ -356,8 +356,16 @@ globalThis.WaveCore = (() => {
       edges: { enabled: false, inset: 25, amplitude: 12, top: true, right: true, bottom: true, left: true },
     };
   }
+  // Estimated garment measurements (flat back width, collar to hem) until a real jersey is measured
+  const JERSEY_SIZES = {
+    XS: { widthCm: 46, lengthCm: 68 }, S: { widthCm: 49, lengthCm: 70 }, M: { widthCm: 52, lengthCm: 72 },
+    L: { widthCm: 55, lengthCm: 74 }, XL: { widthCm: 58, lengthCm: 76 }, XXL: { widthCm: 61, lengthCm: 78 },
+  };
+  // printX: cm from the back centre line to the print centre; printY: cm from the neck point to the print's top edge
+  const defaultBackPrint = () => ({ printX: 0, printY: 8 });
+  const defaultJersey = () => ({ size: "M", color: "#86C4E3", ...defaultBackPrint() });
   function defaultDesign() {
-    return { version: 2, drawing: { canvas: { widthCm: 29.7, heightCm: 42 }, elements: [] }, style: defaultStyle() };
+    return { version: 2, drawing: { canvas: { widthCm: 29.7, heightCm: 42 }, elements: [], jersey: defaultJersey() }, style: defaultStyle() };
   }
   // Fill in style settings that did not exist when a design or style file was saved.
   function completeStyle(style) {
@@ -366,14 +374,14 @@ globalThis.WaveCore = (() => {
     return full;
   }
   function migrateDesign(d) {
-    if (d.version === 2) return { ...d, style: completeStyle(d.style) };
+    if (d.version === 2) return { ...d, drawing: { jersey: defaultJersey(), ...d.drawing }, style: completeStyle(d.style) };
     const style = defaultStyle();
     Object.assign(style.sea, d.sea);
     style.palette = { transparent: null, ...d.palette };
     style.letters = { emphasis: d.emphasis, bend: d.bend };
     const elements = d.elements.map((el) =>
       el.type === "svg" && el.rings ? { ...Object.fromEntries(Object.entries(el).filter(([k]) => k !== "rings")), parts: [el.rings] } : el);
-    return { version: 2, drawing: { canvas: d.canvas, elements }, style: completeStyle(style) };
+    return { version: 2, drawing: { canvas: d.canvas, elements, jersey: defaultJersey() }, style: completeStyle(style) };
   }
 
   function exportStyle(style, name) {
@@ -1275,7 +1283,7 @@ globalThis.WaveCore = (() => {
     return migrateDesign(JSON.parse(unescapeXml(m[1])));
   }
 
-  return { defaultDesign, defaultStyle, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
+  return { defaultDesign, defaultStyle, JERSEY_SIZES, defaultBackPrint, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
     exportStyle, parseStyle, centred, eraseStrokes, figure, registerFigures, figureList: () => [...FIGURES.values()], letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
 })();
 </script>

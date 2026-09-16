@@ -117,3 +117,19 @@ test("exported SVG embeds each used figure picture once and places every figure"
   assert.strictEqual((svg.match(/<use /g) || []).length, geo.figures.length);
   assert.strictEqual((svg.match(/<path /g) || []).length, geo.ribbons.length + geo.fills.length);
 });
+
+test("a design saved before the jersey existed opens with the default back print", () => {
+  const d = sampleDesign();
+  delete d.drawing.jersey;
+  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "M", color: "#86C4E3", printX: 0, printY: 8 });
+});
+
+test("jersey size, colour and print position survive export and reopen", () => {
+  const d = sampleDesign();
+  d.drawing.jersey = { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 };
+  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 });
+});
