@@ -245,6 +245,48 @@ test("the boats slider scatters only boats, sized by boat size", () => {
   assert.ok(lengths[0] >= 40 && lengths[lengths.length - 1] <= 100, `5 cm boats are ${lengths} mm long`);
 });
 
+const stamp = (extra) => ({ id: "st", type: "stamp", figure: "a00", mode: "riding", transform: { x: 150, y: 70, s: 1, r: null }, ...extra });
+
+test("a riding stamp sits on top of the sea, turns to the flow, and trails a wake", () => {
+  const d = design();
+  d.drawing.elements = [verticalStroke(), box, stamp({ transform: { x: 172, y: 120, s: 0.5, r: null } })];
+  const out = core.generate(d, "full");
+  const placed = out.figures.filter((f) => f.stamp === "st");
+  assert.strictEqual(placed.length, 1);
+  assert.strictEqual(placed[0].figure, "a00");
+  assert.ok(Math.abs(placed[0].length - 20 * core.figure("a00").len) < 0.01, `stamp length ${placed[0].length}`);
+  assertRides(out, placed[0], d.style.sea.spacingMm);
+  // checked strip must be wider than the 8 mm line spacing for such a small stamp
+  assert.ok(seaUnder(out, placed.map((f) => ({ ...f, width: f.width * 1.5 }))), "no sea under the riding stamp");
+});
+
+test("a stamp rotated and scaled by hand keeps that angle and size", () => {
+  const d = design();
+  d.drawing.elements = [stamp({ transform: { x: 150, y: 70, s: 1.5, r: 1 } })];
+  const [placed] = core.generate(d, "full").figures;
+  assert.strictEqual(placed.angle, 1);
+  assert.ok(Math.abs(placed.length - 60 * core.figure("a00").len) < 0.01);
+});
+
+test("an obstacle stamp makes the waves part around it", () => {
+  const d = design();
+  d.drawing.elements = [stamp({ figure: "a12", mode: "obstacle", transform: { x: 100, y: 120, s: 1, r: 0.3 } })];
+  const out = core.generate(d, "full");
+  const [placed] = out.figures;
+  assert.strictEqual(placed.angle, 0.3);
+  assert.ok(!seaUnder(out, [placed]), "sea runs through the obstacle");
+  assert.strictEqual(out.ribbons.filter((r) => r.kind === "wake").length, 0, "obstacles have no wake");
+});
+
+test("the letter boat can ride on top of the waves with a wake", () => {
+  const d = design();
+  d.drawing.elements = [{ id: "b1", type: "boat", mode: "riding", transform: { x: 100, y: 120, s: 0.5, r: 0 } }];
+  const out = core.generate(d, "full");
+  const hull = out.fills.find((f) => f.kind === "boat" && f.rings[0].length === 4).rings;
+  assert.ok(out.streamlines.some((line) => line.some(([x, y]) => core.insideRings(hull, x, y))), "sea parts around a riding boat");
+  assert.ok(out.ribbons.some((r) => r.kind === "wake" && r.stamp === "b1"), "riding boat without a wake");
+});
+
 test("surfer size sets how long the surfers are printed", () => {
   const d = design();
   d.style.variety.surfers = 1;

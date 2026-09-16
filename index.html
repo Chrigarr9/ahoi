@@ -849,6 +849,11 @@ globalThis.WaveCore = (() => {
   function registerFigures(list) { for (const f of list) FIGURES.set(f.id, { len: 1, ...f }); }
   registerFigures(globalThis.FIGURE_LIBRARY || []);
   const figure = (id) => FIGURES.get(id) || null;
+  // A stamp's printed size: surfers 4 cm and boats 6 cm long at scale 1, times the figure's relative length
+  function stampSize(el) {
+    const f = figure(el.figure), length = (f.kind === "boat" ? 60 : 40) * f.len * el.transform.s;
+    return { length, width: (length * f.h) / f.w };
+  }
   function luminance(hex) {
     const [r, g, b] = hexToRgb(hex);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
@@ -964,8 +969,25 @@ globalThis.WaveCore = (() => {
     const guides = letterLines.slice();
     const fills = [];
     const waveFilled = []; // regions filled with their own strokes after the sea
+    const obstacleFigures = [];
     for (const el of drawing.elements) {
+      if (el.type === "stamp") { // obstacle stamps part the waves like a solid shape; riding stamps come after the field
+        if (el.mode !== "obstacle" || !figure(el.figure)) continue;
+        const { length, width } = stampSize(el), { x, y } = el.transform, r = el.transform.r ?? 0;
+        const ring = circleRing(1, 40).map(([cx, cy]) => applyTransform({ x, y, s: 1, r }, [(cx * length) / 2, (cy * width) / 2]));
+        const outline = resample(ring.concat([ring[0]]), step);
+        block(outline, dsep / 2);
+        offsetSeeds(outline, dsep, seeds);
+        guides.push(outline);
+        block(interiorSamples([ring], dsep / 2), dsep / 2);
+        obstacleFigures.push({ figure: el.figure, x, y, angle: r, length, width, stamp: el.id });
+        continue;
+      }
       const mode = el.type === "dot" ? "solid" : el.mode || "solid";
+      if (mode === "riding") { // the letter boat on top of the waves: drawn, but blocks nothing
+        for (const fill of localFills(el, style, rng)) fills.push({ ...fill, rings: fill.rings.map((ring) => ring.map((p) => applyTransform(el.transform, p))) });
+        continue;
+      }
       for (const fill of localFills(el, style, rng)) {
         const rings = fill.rings.map((ring) => ring.map((p) => applyTransform(el.transform, p)));
         if (mode === "woven") { // outline behaves exactly like a painted letter stroke
@@ -993,7 +1015,7 @@ globalThis.WaveCore = (() => {
     const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3), guides, sigma);
     // figures: surfers and boats riding on top of the sea along the flow, each trailing a foam wake; placed before the
     // sea so they only avoid letters and shapes, while the sea keeps running underneath
-    const figures = [], wakes = [];
+    const figures = obstacleFigures, wakes = [];
     const foam = style.palette.strokes.filter((_, i) => i !== style.palette.transparent).map((c) => c.color)
       .concat([style.palette.letter]).sort((a, b) => luminance(b) - luminance(a))[0];
     const clear = ([px, py], r) => px > 0 && py > 0 && px < W && py < H && inBorder(px, py) && packer.free(px, py, r, 1);
@@ -1007,7 +1029,13 @@ globalThis.WaveCore = (() => {
         }
       }
       if (figures.some((o) => Math.hypot(o.x - x, o.y - y) < (Math.max(o.length, o.width) + Math.max(length, width)) / 2)) return null;
-      const wake = [at(-length / 2, 0)];
+      const wake = wakeBehind(at(-length / 2, 0), dir, length, width);
+      if (wake.length * step < length * 1.2) return null; // no room behind for a wake
+      return { placed: { figure: id, x, y, angle: Math.atan2(uy, ux), length, width }, wake };
+    }
+    // follow the flow backwards from the tail until the wake is long enough or runs into a letter
+    function wakeBehind(tail, [ux, uy], length, width) {
+      const wake = [tail];
       let back = [-ux, -uy];
       while (wake.length * step < length * 2.5) {
         const [px, py] = wake[wake.length - 1];
@@ -1018,15 +1046,35 @@ globalThis.WaveCore = (() => {
         if (!clear(next, width * 0.35)) break;
         wake.push(next);
       }
-      if (wake.length * step < length * 1.2) return null; // no room behind for a wake
-      return { placed: { figure: id, x, y, angle: Math.atan2(uy, ux), length, width }, wake };
+      return wake;
+    }
+    function addWake(wake, width, owner) {
+      if (wake.length < 3) return;
+      const w0 = Math.min(width, wake.length * step * 0.15) * 0.55;
+      wakes.push({ line: wake, w0, color: foam, ...owner });
+      // the sea opens up in a V behind the figure so the foam stands out
+      wake.forEach((p, i) => { if (i < wake.length * 0.7) packer.add([p], w0 * 0.5 + i * step * 0.2); });
     }
     function addRider({ placed, wake }) {
       figures.push(placed);
-      const w0 = Math.min(placed.width, wake.length * step * 0.15) * 0.55;
-      wakes.push({ line: wake, w0, color: foam, figure: figures.length - 1 });
-      // the sea opens up in a V behind the figure so the foam stands out
-      wake.forEach((p, i) => { if (i < wake.length * 0.7) packer.add([p], w0 * 0.5 + i * step * 0.2); });
+      addWake(wake, placed.width, { figure: figures.length - 1, stamp: placed.stamp });
+    }
+    const tiltDir = [Math.cos((sea.tilt * Math.PI) / 180), Math.sin((sea.tilt * Math.PI) / 180)];
+    for (const el of drawing.elements) {
+      const { x, y, r, s } = el.transform || {};
+      if (el.type === "stamp" && el.mode !== "obstacle" && figure(el.figure)) {
+        const { length, width } = stampSize(el);
+        const tailWake = (d) => wakeBehind([x - (d[0] * length) / 2, y - (d[1] * length) / 2], d, length, width);
+        let dir = r == null ? fieldDirection(field, x, y, ...tiltDir) || tiltDir : [Math.cos(r), Math.sin(r)], wake = tailWake(dir);
+        if (r == null) { // following the flow: face whichever way leaves more room for the wake
+          const other = tailWake([-dir[0], -dir[1]]);
+          if (other.length > wake.length) { dir = [-dir[0], -dir[1]]; wake = other; }
+        }
+        addRider({ placed: { figure: el.figure, x, y, angle: r ?? Math.atan2(dir[1], dir[0]), length, width, stamp: el.id }, wake });
+      } else if (el.type === "boat" && el.mode === "riding") {
+        const dir = [Math.cos(r), Math.sin(r)];
+        addWake(wakeBehind(applyTransform(el.transform, [-46, 47]), dir, 92 * s, 22 * s), 22 * s, { stamp: el.id });
+      }
     }
     for (const [kind, amount, sizeCm, area] of [["boat", variety.boats, variety.boatSize, 320], ["surfer", variety.surfers, variety.surferSize, 250]]) {
       const pool = [...FIGURES.values()].filter((f) => f.kind === kind);
@@ -1130,9 +1178,9 @@ globalThis.WaveCore = (() => {
       if (poly) ribbons.push({ points: poly, color, kind: "letter", width });
     }
     // wakes: a foam trail that swells out of the tail and fades, with two thin lines spreading to the sides
-    for (const { line, w0, color, figure: owner } of wakes) {
+    for (const { line, w0, color, figure: owner, stamp } of wakes) {
       const trail = ribbon(line, w0, (t) => Math.pow(Math.min(1, t / 0.08), 0.5) * Math.pow(1 - t, 1.6), dsep / 6);
-      if (trail) ribbons.push({ points: trail, color, kind: "wake", width: w0, figure: owner });
+      if (trail) ribbons.push({ points: trail, color, kind: "wake", width: w0, figure: owner, stamp });
       const short = line.slice(0, Math.ceil(line.length * 0.6));
       for (const side of [-1, 1]) {
         const spread = short.map((p, i) => {
@@ -1142,7 +1190,7 @@ globalThis.WaveCore = (() => {
           return [p[0] - ((b[1] - a[1]) / len) * off, p[1] + ((b[0] - a[0]) / len) * off];
         });
         const edge = ribbon(spread, w0 * 0.3, (t) => Math.pow(Math.min(1, t / 0.15), 0.7) * Math.pow(1 - t, 1.2), dsep / 6);
-        if (edge) ribbons.push({ points: edge, color, kind: "wake", width: w0 * 0.3, figure: owner });
+        if (edge) ribbons.push({ points: edge, color, kind: "wake", width: w0 * 0.3, figure: owner, stamp });
       }
     }
     const background = style.palette.transparent === "background" ? null : style.palette.background;
