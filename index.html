@@ -1585,11 +1585,19 @@ globalThis.WaveCore = (() => {
     const frame = jerseyFrame(), m = c.getTransform();
     c.drawImage(photo, 0, 0, frame.width, frame.height);
     if (!geo) return;
-    const print = document.createElement("canvas");
-    print.width = seaCanvas.width; print.height = seaCanvas.height;
+    const print = jerseyPrintCanvas; // reused: a drag repaints on every move
+    if (print.width !== seaCanvas.width || print.height !== seaCanvas.height) { print.width = seaCanvas.width; print.height = seaCanvas.height; }
     const x = print.getContext("2d");
+    x.setTransform(1, 0, 0, 1, 0, 0);
+    x.globalCompositeOperation = "source-over";
+    x.clearRect(0, 0, print.width, print.height);
     x.setTransform(m.a, 0, 0, m.d, m.a * frame.print[0], m.d * frame.print[1]);
+    x.save();
+    x.beginPath();
+    x.rect(0, 0, W(), H()); // only the print area gets printed: figures and wakes hanging over its edge are cut off
+    x.clip();
     paintGeometry(x, geo);
+    x.restore();
     x.setTransform(m);
     x.globalCompositeOperation = "destination-in";
     x.drawImage(photo, 0, 0, frame.width, frame.height);
@@ -1599,6 +1607,7 @@ globalThis.WaveCore = (() => {
     c.restore();
   }
   // The photo in the shirt colour: brightness relative to the photo's own blue keeps the folds; white trim stays white
+  const jerseyPrintCanvas = document.createElement("canvas");
   let jerseyImage = null, jerseyCache = { color: null, canvas: null };
   function jerseyPhoto(color) {
     if (!jerseyImage) {
@@ -1728,6 +1737,7 @@ globalThis.WaveCore = (() => {
     shape: "Draw a closed outline. Choose Solid, Woven or Wave-filled for it under Selection.",
   };
   const NAV_HINT = PHONE ? " Two fingers pan and pinch to zoom." : " Pinch or scroll to zoom, two fingers or right-drag to pan.";
+  const showCursor = () => (stage.style.cursor = viewMode === "jersey" ? "move" : tool === "select" ? "default" : tool === "eraser" ? "none" : "crosshair");
   const showHint = () => ($("hint").textContent = (viewMode === "jersey" ? "Drag to place the print on the back. Jersey sizes are estimates." : HINTS[tool]) + NAV_HINT);
   let drawing = null, dragOp = null, eraseSession = 0;
 
@@ -1739,7 +1749,7 @@ globalThis.WaveCore = (() => {
     tool = t;
     for (const b of document.querySelectorAll("[data-tool]")) b.setAttribute("aria-pressed", String(b.dataset.tool === t));
     showHint();
-    stage.style.cursor = t === "select" ? "default" : t === "eraser" ? "none" : "crosshair";
+    showCursor();
     $("eraser-size").hidden = t !== "eraser";
     $("stamp-panel").hidden = t !== "stamp";
     select(t === "select" ? selectedId : null);
@@ -2570,6 +2580,7 @@ globalThis.WaveCore = (() => {
     viewMode = mode;
     for (const m of ["sea", "letters", "jersey"]) $("view-" + m).setAttribute("aria-pressed", String(m === mode));
     showHint();
+    showCursor();
     Object.assign(view, { zoom: 1, x: 0, y: 0 });
     refreshControls(); // the stage changes size between the print and the jersey
     paintSea();
