@@ -1618,8 +1618,9 @@ globalThis.WaveCore = (() => {
     const target = rgb(color), base = lum(rgb(JERSEY_PHOTO.baseColor));
     for (let i = 0; i < px.length; i += 4) {
       const p = [px[i], px[i + 1], px[i + 2]], l = lum(p);
-      if (Math.max(...p) - Math.min(...p) < 24 && l > 200) continue; // collar and cuffs
-      for (let ch = 0; ch < 3; ch++) px[i + ch] = Math.min(255, (target[ch] * l) / base);
+      // grey-white collar and cuffs keep their colour; fading in by saturation keeps their anti-aliased edges clean
+      const t = l > 180 ? Math.max(0, Math.min(1, (Math.max(...p) - Math.min(...p) - 12) / 36)) : 1;
+      for (let ch = 0; ch < 3; ch++) px[i + ch] = p[ch] + (Math.min(255, (target[ch] * l) / base) - p[ch]) * t;
     }
     x.putImageData(data, 0, 0);
     jerseyCache = { color, canvas: c };

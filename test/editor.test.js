@@ -603,3 +603,61 @@ test("a new design previews on the jersey as a transparent back print in the shi
   assert.ok(a === 255 && b > 200 && g > 160 && r > 100 && r < 180, `light-blue shirt, got ${[r, g, b, a]}`);
   assert.deepStrictEqual(page.errors, []);
 });
+
+test("dragging in the jersey view moves the print in cm, and Back print default puts it back", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Jersey", exact: true }).click();
+  await shirtPainted(page);
+  // the M jersey's photo spans 453 px at 52 cm over its 282 px torso: the stage is 453 / 282 * 52 cm wide
+  const box = await page.locator("#stage").boundingBox();
+  const pxPerCm = box.width / ((453 / 282) * 52);
+  const [x0, y0] = [box.x + box.width / 2, box.y + box.height * 0.4];
+  await page.mouse.move(x0, y0);
+  await page.mouse.down();
+  await page.mouse.move(x0 + 5 * pxPerCm, y0 + 3 * pxPerCm, { steps: 10 });
+  await page.mouse.up();
+
+  let { jersey } = (await exportedDesign(page)).drawing;
+  assert.ok(Math.abs(jersey.printX - 5) < 0.5 && Math.abs(jersey.printY - 11) < 0.5, `print at ${jersey.printX} / ${jersey.printY} cm`);
+  await page.getByRole("button", { name: "Back print default", exact: true }).click();
+  ({ jersey } = (await exportedDesign(page)).drawing);
+  assert.deepStrictEqual([jersey.printX, jersey.printY], [0, 8]);
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 0, "the drag drew nothing");
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("changing the shirt colour recolours the jersey and the transparent background", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Jersey", exact: true }).click();
+  await shirtPainted(page);
+  await page.getByLabel("Shirt colour").fill("#d8433a");
+  const [r, g, b] = await pixelAt(page, 0.5, 0.95);
+  assert.ok(r > 150 && r > g + 60 && r > b + 60, `reddish shirt, got ${[r, g, b]}`);
+  assert.strictEqual((await exportedDesign(page)).style.palette.background, "#d8433a");
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("a bigger jersey size makes the same print look smaller on the shirt", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Jersey", exact: true }).click();
+  await shirtPainted(page);
+  // the waves' extent across the middle of the back, as a share of the whole shirt shown on the stage
+  const printShare = () => page.evaluate(() => {
+    const c = document.getElementById("stage"), x = c.getContext("2d");
+    const shirtRed = x.getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.95), 1, 1).data[0];
+    let x0 = Infinity, x1 = -Infinity;
+    for (let y = Math.floor(c.height * 0.25); y < c.height * 0.5; y += 5) {
+      const row = x.getImageData(0, y, c.width, 1).data;
+      for (let i = Math.floor(c.width * 0.2); i < c.width * 0.8; i++) {
+        if (row[4 * i + 3] === 255 && Math.abs(row[4 * i] - shirtRed) > 50) { x0 = Math.min(x0, i); x1 = Math.max(x1, i); }
+      }
+    }
+    return (x1 - x0) / c.width;
+  });
+  await page.getByLabel("Jersey size").selectOption("S");
+  const small = await printShare();
+  await page.getByLabel("Jersey size").selectOption("XXL");
+  const big = await printShare();
+  assert.ok(small > 0.2 && big < small * 0.9, `print share on S ${small}, on XXL ${big}`);
+  assert.deepStrictEqual(page.errors, []);
+});
