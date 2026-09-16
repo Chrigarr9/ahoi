@@ -392,7 +392,13 @@ globalThis.WaveCore = (() => {
     const out = [];
     for (const el of elements) {
       if (el.type !== "stroke") { out.push(el); continue; }
-      const world = resample(el.points.map((p) => applyTransform(el.transform, p)), radius / 3);
+      // add points between the original ones (never replace them) so cuts are precise and untouched parts keep their shape
+      const world = [];
+      el.points.map((p) => applyTransform(el.transform, p)).forEach((p, i, all) => {
+        if (i === 0) return world.push(p);
+        const a = all[i - 1], n = Math.max(1, Math.ceil(Math.hypot(p[0] - a[0], p[1] - a[1]) / (radius / 3)));
+        for (let j = 1; j <= n; j++) world.push([a[0] + ((p[0] - a[0]) * j) / n, a[1] + ((p[1] - a[1]) * j) / n]);
+      });
       const keep = world.map(([px, py]) => Math.hypot(px - x, py - y) > radius);
       if (keep.every(Boolean)) { out.push(el); continue; }
       changed = true;
@@ -1167,8 +1173,9 @@ globalThis.WaveCore = (() => {
   }
   new ResizeObserver(() => layout()).observe(workspace);
 
-  function zoomAt(clientX, clientY, factor) {
-    const mm = toMM({ clientX, clientY });
+  // Zoom by `factor` so the canvas point that was under (fromX, fromY) ends up under (clientX, clientY).
+  function zoomAt(clientX, clientY, factor, fromX = clientX, fromY = clientY) {
+    const mm = toMM({ clientX: fromX, clientY: fromY });
     view.zoom = Math.max(0.25, Math.min(20, view.zoom * factor));
     const ws = workspace.getBoundingClientRect();
     const fit = Math.max(0.05, Math.min((ws.width - 48) / W(), (ws.height - 48) / H()));
@@ -1411,7 +1418,7 @@ globalThis.WaveCore = (() => {
       if (dragOp.mode === "rotate") t.r = start.r + Math.atan2(p[1] - t.y, p[0] - t.x) - dragOp.a0;
       draw();
     } else if (tool === "eraser") {
-      if (e.buttons || e.pointerType !== "mouse") eraseAt(p);
+      if (e.buttons) eraseAt(p); // hovering pens and mice only move the eraser ring
       else draw();
     }
   }
@@ -1453,13 +1460,14 @@ globalThis.WaveCore = (() => {
 
   // ---------- pointer routing: pen and mouse use the tool, fingers pan and pinch (unless "finger draws")
   const touches = new Map();
+  const palms = new Set(); // touches that landed while the pen was down: ignored until they lift
   let toolPointer = null, panDrag = null, penDown = false;
   workspace.addEventListener("contextmenu", (e) => e.preventDefault());
   workspace.addEventListener("pointerdown", (e) => {
     workspace.setPointerCapture(e.pointerId);
     statusNote = "";
     if (e.pointerType === "touch") {
-      if (penDown) return; // palm resting while the pen draws
+      if (penDown) { palms.add(e.pointerId); return; } // palm resting while the pen draws
       touches.set(e.pointerId, [e.clientX, e.clientY]);
       if (ui.fingerDraws && touches.size === 1) { toolPointer = e.pointerId; toolDown(e); return; }
       if (toolPointer !== null) { toolCancel(); toolPointer = null; }
@@ -1471,6 +1479,7 @@ globalThis.WaveCore = (() => {
     toolDown(e);
   });
   workspace.addEventListener("pointermove", (e) => {
+    if (palms.has(e.pointerId)) return;
     if (panDrag && e.pointerId === panDrag.id) {
       view.x += e.clientX - panDrag.x; view.y += e.clientY - panDrag.y;
       panDrag.x = e.clientX; panDrag.y = e.clientY;
@@ -1483,16 +1492,19 @@ globalThis.WaveCore = (() => {
       const after = [...touches.values()];
       const centre = (pts) => [pts.reduce((a, q) => a + q[0], 0) / pts.length, pts.reduce((a, q) => a + q[1], 0) / pts.length];
       const [bx, by] = centre(before), [ax, ay] = centre(after);
-      view.x += ax - bx; view.y += ay - by;
-      if (after.length >= 2) {
+      if (after.length >= 2) { // pinch and pan together: the point between the fingers follows them
         const spread = (pts) => Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]) || 1;
-        zoomAt(ax, ay, spread(after) / spread(before));
-      } else layout({ repaint: false });
+        zoomAt(ax, ay, spread(after) / spread(before), bx, by);
+      } else {
+        view.x += ax - bx; view.y += ay - by;
+        layout({ repaint: false });
+      }
       return;
     }
-    if (toolPointer === null || e.pointerId === toolPointer) toolMove(e);
+    if (e.pointerId === toolPointer || (toolPointer === null && e.pointerType !== "touch")) toolMove(e);
   });
   const release = (e) => {
+    if (palms.delete(e.pointerId)) return;
     if (panDrag && e.pointerId === panDrag.id) { panDrag = null; return; }
     if (touches.delete(e.pointerId) && toolPointer !== e.pointerId) { layout(); return; }
     if (e.pointerId === toolPointer) {

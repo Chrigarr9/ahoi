@@ -278,3 +278,66 @@ test("a transparent background exports a PNG with transparent pixels", async () 
   assert.strictEqual(png[25], 6, "RGBA colour type");
   assert.strictEqual(raw[4], 0, "corner pixel alpha");
 });
+
+test("two fingers moving together pan the canvas", async () => {
+  const page = await openTool();
+  const box0 = await page.locator("#stage").boundingBox();
+  const [cx, cy] = [box0.x + box0.width / 2, box0.y + box0.height / 2];
+  await touch(page, Array.from({ length: 8 }, (_, i) => [[cx - 40 + i * 10, cy], [cx + 40 + i * 10, cy]]));
+  const box1 = await page.locator("#stage").boundingBox();
+  assert.ok(Math.abs(box1.x - box0.x - 70) < 5, `moved ${box1.x - box0.x}px`);
+  assert.ok(Math.abs(box1.width - box0.width) < 2, "no zoom without spreading the fingers");
+});
+
+// one DevTools session per page, so a pen press and its release pair up
+const sessions = new WeakMap();
+async function cdpFor(page) {
+  if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
+  return sessions.get(page);
+}
+async function penEvent(page, type, [fx, fy], buttons) {
+  const cdp = await cdpFor(page);
+  const [x, y] = await at(page, fx, fy);
+  const button = type === "mouseMoved" && !buttons ? "none" : "left"; // hover has no button; press/release do
+  await cdp.send("Input.dispatchMouseEvent", { type, x, y, button, buttons, pointerType: "pen", clickCount: 1 });
+}
+
+test("a pen hovering over a stroke with the eraser does not erase", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
+  await page.getByRole("button", { name: "Eraser", exact: true }).click();
+  for (let fy = 0.44; fy <= 0.56; fy += 0.005) await penEvent(page, "mouseMoved", [0.5, fy], 0);
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1);
+});
+
+test("a palm resting while the pen draws does not erase after the pen lifts", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
+  await page.getByRole("button", { name: "Eraser", exact: true }).click();
+  const cdp = await cdpFor(page);
+  await penEvent(page, "mousePressed", [0.9, 0.1], 1);
+  const palm = async (type, fy) => { const [x, y] = await at(page, 0.5, fy);
+    await cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, id: 0 }] }); };
+  await palm("touchStart", 0.4);
+  await penEvent(page, "mouseReleased", [0.9, 0.1], 0);
+  for (let fy = 0.44; fy <= 0.56; fy += 0.005) await palm("touchMove", fy);
+  await palm("touchEnd");
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1);
+});
+
+test("erasing near one end keeps the far end of the stroke exactly", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
+  const original = worldPoints((await exportedDesign(page)).drawing.elements[0]);
+  const farEnd = original.reduce((a, p) => (p[0] > a[0] ? p : a));
+  await page.getByRole("button", { name: "Eraser", exact: true }).click();
+  await page.getByRole("slider", { name: "Eraser size" }).fill("40");
+  await drag(page, [0.2, 0.45], [0.2, 0.55], 10);
+
+  const [piece] = (await exportedDesign(page)).drawing.elements;
+  const end = worldPoints(piece).reduce((a, p) => (p[0] > a[0] ? p : a));
+  assert.ok(Math.hypot(end[0] - farEnd[0], end[1] - farEnd[1]) < 0.5, `far end moved from ${farEnd} to ${end}`);
+});
