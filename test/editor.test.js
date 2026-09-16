@@ -55,9 +55,9 @@ test("drawing with the letter tool adds a stroke to the exported design", async 
   await drag(page, [0.3, 0.3], [0.3, 0.6]);
 
   const d = await exportedDesign(page);
-  assert.strictEqual(d.elements.length, 1);
-  assert.strictEqual(d.elements[0].type, "stroke");
-  const ys = worldPoints(d.elements[0]).map((p) => p[1] / (d.canvas.heightCm * 10));
+  assert.strictEqual(d.drawing.elements.length, 1);
+  assert.strictEqual(d.drawing.elements[0].type, "stroke");
+  const ys = worldPoints(d.drawing.elements[0]).map((p) => p[1] / (d.drawing.canvas.heightCm * 10));
   assert.ok(Math.abs(Math.min(...ys) - 0.3) < 0.02 && Math.abs(Math.max(...ys) - 0.6) < 0.02, `stroke spans ${Math.min(...ys)}..${Math.max(...ys)}`);
   assert.deepStrictEqual(page.errors, []);
 });
@@ -69,14 +69,14 @@ test("a placed boat can be moved, and undo puts it back", async () => {
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await drag(page, [0.5, 0.5], [0.7, 0.5]);
 
-  const W = (d) => d.canvas.widthCm * 10;
+  const W = (d) => d.drawing.canvas.widthCm * 10;
   let d = await exportedDesign(page);
-  assert.strictEqual(d.elements[0].type, "boat");
-  assert.ok(Math.abs(d.elements[0].transform.x / W(d) - 0.7) < 0.02, `moved boat at ${d.elements[0].transform.x / W(d)}`);
+  assert.strictEqual(d.drawing.elements[0].type, "boat");
+  assert.ok(Math.abs(d.drawing.elements[0].transform.x / W(d) - 0.7) < 0.02, `moved boat at ${d.drawing.elements[0].transform.x / W(d)}`);
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   d = await exportedDesign(page);
-  assert.ok(Math.abs(d.elements[0].transform.x / W(d) - 0.5) < 0.02, `undone boat at ${d.elements[0].transform.x / W(d)}`);
+  assert.ok(Math.abs(d.drawing.elements[0].transform.x / W(d) - 0.5) < 0.02, `undone boat at ${d.drawing.elements[0].transform.x / W(d)}`);
   assert.deepStrictEqual(page.errors, []);
 });
 
@@ -84,8 +84,8 @@ test("an exported SVG reopens with the same design", async () => {
   const page = await openTool();
   await page.getByRole("button", { name: "Dot", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
-  await page.getByLabel("Seed").fill("42");
-  await page.getByLabel("Seed").press("Enter");
+  await page.getByLabel("Seed", { exact: true }).fill("42");
+  await page.getByLabel("Seed", { exact: true }).press("Enter");
   const svg = await download(page, "Export SVG");
 
   const fresh = await openTool();
@@ -93,8 +93,8 @@ test("an exported SVG reopens with the same design", async () => {
   await fresh.getByRole("status").filter({ hasText: /opened/i }).waitFor();
   const reopened = await exportedDesign(fresh);
   assert.deepStrictEqual(reopened, core.loadDesignFromSVG(svg.toString("utf8")));
-  assert.strictEqual(reopened.sea.seed, 42);
-  assert.strictEqual(reopened.elements[0].type, "dot");
+  assert.strictEqual(reopened.style.sea.seed, 42);
+  assert.strictEqual(reopened.drawing.elements[0].type, "dot");
 });
 
 test("PNG export size follows the canvas size in cm and the DPI", async () => {
@@ -117,7 +117,7 @@ test("clicking an element selects it so it can be deleted", async () => {
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
   await page.getByRole("button", { name: "Delete", exact: true }).click({ timeout: 2000 });
 
-  assert.strictEqual((await exportedDesign(page)).elements.length, 0);
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 0);
 });
 
 test("a selection colour picker keeps working across repeated changes", async () => {
@@ -128,21 +128,21 @@ test("a selection colour picker keeps working across repeated changes", async ()
   await sail.fill("#ff0000");
   await sail.fill("#00ff00");
 
-  assert.strictEqual((await exportedDesign(page)).elements[0].sailColor, "#00ff00");
+  assert.strictEqual((await exportedDesign(page)).drawing.elements[0].sailColor, "#00ff00");
 });
 
 test("reset starts a fresh default design, and undo brings the old one back", async () => {
   const page = await openTool();
   await page.getByRole("button", { name: "Dot", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
-  await page.getByLabel("Seed").fill("42");
-  await page.getByLabel("Seed").press("Enter");
+  await page.getByLabel("Seed", { exact: true }).fill("42");
+  await page.getByLabel("Seed", { exact: true }).press("Enter");
 
   await page.getByRole("button", { name: "Reset", exact: true }).click();
   assert.deepStrictEqual(await exportedDesign(page), core.defaultDesign());
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   const restored = await exportedDesign(page);
-  assert.strictEqual(restored.sea.seed, 42);
-  assert.strictEqual(restored.elements.length, 1);
+  assert.strictEqual(restored.style.sea.seed, 42);
+  assert.strictEqual(restored.drawing.elements.length, 1);
 });
