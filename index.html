@@ -1250,12 +1250,14 @@ globalThis.WaveCore = (() => {
       out.push("<defs>", ...[...new Set(placed.map((p) => p.figure))].map((id) => {
         const f = figure(id), href = hrefFor(id);
         return `<image id="figure-${escapeXml(id)}" data-kind="${f.kind}" data-len="${f.len}" width="${f.w}" height="${f.h}" href="${href}" xlink:href="${href}"/>`;
-      }), "</defs>");
+      }), `<filter id="figure-shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="1.2" dy="1.6" stdDeviation="0.9" flood-color="#08142a" flood-opacity=".35"/></filter>`, "</defs>");
+      out.push(`<g filter="url(#figure-shadow)">`); // soft shadow on the water, in mm
       for (const p of placed) {
         const { w, h } = figure(p.figure);
         out.push(`<use href="#figure-${escapeXml(p.figure)}" xlink:href="#figure-${escapeXml(p.figure)}" transform="translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) ` +
           `rotate(${((p.angle * 180) / Math.PI).toFixed(2)}) scale(${(p.length / w).toFixed(5)}) translate(${-w / 2} ${-h / 2})"/>`);
       }
+      out.push("</g>");
     }
     out.push("</svg>");
     return out.join("\n");
@@ -1444,10 +1446,12 @@ globalThis.WaveCore = (() => {
       c.fillStyle = f.color;
       c.fill(p, "evenodd");
     }
+    const mm = c.getTransform().a; // canvas shadows are measured in device pixels, so convert from mm
     for (const f of g.figures || []) {
       const img = figureSource(f.figure);
       if (!img) continue; // repainted once the picture has loaded
       c.save();
+      Object.assign(c, { shadowColor: "rgba(8, 20, 42, 0.35)", shadowBlur: 1.8 * mm, shadowOffsetX: 1.2 * mm, shadowOffsetY: 1.6 * mm }); // soft shadow on the water
       c.translate(f.x, f.y);
       c.rotate(f.angle);
       c.drawImage(img, -f.length / 2, -f.width / 2, f.length, f.width);
