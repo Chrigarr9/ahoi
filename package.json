@@ -1,0 +1,10 @@
+{
+  "name": "wave-name-tool",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
+  }
+}
