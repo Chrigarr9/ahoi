@@ -8,6 +8,8 @@ module.exports = function loadCore() {
   const m = /<script id="core">([\s\S]*?)<\/script>/.exec(html);
   if (!m) throw new Error('index.html has no <script id="core"> block');
   const ctx = vm.createContext({});
+  const sprites = /<script id="figure-library">([\s\S]*?)<\/script>/.exec(html);
+  if (sprites) vm.runInContext(sprites[1], ctx);
   vm.runInContext(m[1], ctx);
   return ctx.WaveCore;
 };

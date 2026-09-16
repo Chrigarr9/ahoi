@@ -21,12 +21,13 @@ function sampleDesign() {
 
 test("exported SVG has physical size and one path per ribbon and fill", () => {
   const d = sampleDesign();
+  d.style.palette.transparent = null;
   const geo = core.generate(d, "full");
   const svg = core.exportSVG(d, geo);
 
   assert.match(svg, /<svg[^>]* width="20cm" height="25cm" viewBox="0 0 200 250"/);
   assert.strictEqual((svg.match(/<path /g) || []).length, geo.ribbons.length + geo.fills.length);
-  assert.match(svg, /fill="#587ca0"/, "background colour");
+  assert.match(svg, /<rect width="200" height="250" fill="#86C4E3"\/>/, "background colour");
 });
 
 test("reopening an exported SVG restores the exact design", () => {
@@ -103,4 +104,33 @@ test("a style file round-trips with its name and fills in settings added later",
 
   assert.throws(() => core.parseStyle('{"hello": 1}'), /not a wave style/i);
   assert.throws(() => core.parseStyle("<svg/>"), /not a wave style/i);
+});
+
+test("exported SVG embeds each used figure picture once and places every figure", () => {
+  const d = sampleDesign();
+  d.style.variety.surfers = 1;
+  const geo = core.generate(d, "full");
+  assert.ok(geo.figures.length > 0);
+  const svg = core.exportSVG(d, geo);
+  const used = new Set(geo.figures.map((s) => s.figure));
+  assert.strictEqual((svg.match(/<image /g) || []).length, used.size);
+  assert.match(svg, /<image [^>]*href="data:image\/(png|webp);base64,/);
+  assert.strictEqual((svg.match(/<use /g) || []).length, geo.figures.length);
+  assert.strictEqual((svg.match(/<path /g) || []).length, geo.ribbons.length + geo.fills.length);
+});
+
+test("a design saved before the jersey existed opens with the default back print", () => {
+  const d = sampleDesign();
+  delete d.drawing.jersey;
+  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "M", color: "#86C4E3", printX: 0, printY: 8 });
+});
+
+test("jersey size, colour and print position survive export and reopen", () => {
+  const d = sampleDesign();
+  d.drawing.jersey = { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 };
+  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 });
 });
