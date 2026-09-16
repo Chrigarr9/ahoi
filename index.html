@@ -69,6 +69,11 @@
   .figure-grid button { padding: 2px; height: 44px; display: grid; place-items: center; background: #587ca0; }
   .figure-grid button[aria-pressed=true] { outline: 3px solid var(--sel); outline-offset: -3px; }
   .figure-grid img { max-width: 100%; max-height: 38px; }
+  .brush-controls .segmented { margin: 4px 0; }
+  .brush-controls [hidden] { display: none; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  .swatches button { width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 50%; border: 2px solid var(--line); }
+  .swatches button[aria-pressed=true] { outline: 3px solid var(--sel); outline-offset: 1px; }
   .library-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 4px; align-items: center; margin: 4px 0; }
   .empty { color: var(--muted); font-style: italic; margin: 4px 0; }
   main { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); min-width: 0; }
@@ -153,16 +158,19 @@
     </section>
 
     <section class="step">
-      <h2><span class="num">2</span>Paint your letters</h2>
-      <p class="lead">Names aren't typed: draw every letter yourself with the Letter tool. The waves bend around whatever you paint.</p>
+      <h2><span class="num">2</span>Paint your design</h2>
+      <p class="lead">Paint names and pictures with the Brush. Hidden paint melts into the waves, visible paint shows in its colour; the waves bend around all of it.</p>
       <div class="tools">
-        <button data-tool="stroke" title="Draw a letter stroke (L)"><span class="icon" aria-hidden="true">✎</span>Letter</button>
-        <button data-tool="eraser" title="Rub out parts of letter strokes (E)"><span class="icon" aria-hidden="true">⌫</span>Eraser</button>
-        <button data-tool="dot" title="Place a dot (D)"><span class="icon" aria-hidden="true">●</span>Dot</button>
+        <button data-tool="stroke" title="Paint with the brush; a tap paints a dot (P)"><span class="icon" aria-hidden="true">🖌</span>Brush</button>
+        <button data-tool="eraser" title="Rub out parts of painted strokes (E)"><span class="icon" aria-hidden="true">⌫</span>Eraser</button>
         <button data-tool="stamp" title="Stamp surfers, boats or the letter boat (B)"><span class="icon" aria-hidden="true">⛵</span>Stamp</button>
         <button data-tool="shape" title="Draw a shape (S)"><span class="icon" aria-hidden="true">⬠</span>Shape</button>
         <button id="import-btn" title="Import an SVG silhouette"><span class="icon" aria-hidden="true">⇪</span>Import SVG…</button>
         <button data-tool="select" class="wide" title="Select, move, scale, rotate (V)"><span aria-hidden="true">↖</span>Select</button>
+      </div>
+      <div id="brush-panel" hidden>
+        <div id="brush-controls"></div>
+        <label class="check"><input type="checkbox" id="pen-pressure">Pen pressure</label>
       </div>
       <div id="stamp-panel" hidden>
         <div id="stamp-picker" class="figure-grid" role="group" aria-label="Stamps"></div>
@@ -196,7 +204,7 @@
         <label class="check"><input type="checkbox" id="sg-flow" checked>Flow &amp; seed</label>
         <label class="check"><input type="checkbox" id="sg-colours" checked>Colours</label>
         <label class="check"><input type="checkbox" id="sg-variety" checked>Variety &amp; edges</label>
-        <label class="check"><input type="checkbox" id="sg-letters">Letter hiding &amp; density</label>
+        <label class="check"><input type="checkbox" id="sg-letters">Paint hiding &amp; density</label>
       </div>
       <div id="history" class="history" aria-label="Recent looks"></div>
       <button id="save-style">★ Save current style</button>
@@ -231,7 +239,7 @@
         <label class="check"><input type="checkbox" id="figure-palette">Surfers &amp; boats in palette colours</label>
       </details>
       <details>
-        <summary>Letters &amp; density</summary>
+        <summary>Hidden paint &amp; density</summary>
         <div id="letter-controls"></div>
       </details>
       <details>
@@ -275,7 +283,7 @@
       <div class="topbar-tools">
       <div class="segmented" role="group" aria-label="View">
         <button id="view-sea" aria-pressed="true">Sea</button>
-        <button id="view-letters" aria-pressed="false">Letter view</button>
+        <button id="view-paint" aria-pressed="false">Paint view</button>
         <button id="view-jersey" aria-pressed="false" title="Preview the print on the back of the jersey, true to scale">Jersey</button>
       </div>
       <div class="segmented" role="group" aria-label="Zoom">
@@ -283,7 +291,6 @@
         <button id="zoom-fit" title="Fit to screen">Fit</button>
         <button id="zoom-in" title="Zoom in">+</button>
       </div>
-      <button id="render-full" title="Render at full detail">Render full</button>
       </div>
       <span id="status" role="status"></span>
     </div>
@@ -523,22 +530,35 @@ globalThis.WaveCore = (() => {
     const out = [];
     for (const el of elements) {
       if (el.type !== "stroke") { out.push(el); continue; }
-      // add points between the original ones (never replace them) so cuts are precise and untouched parts keep their shape
-      const world = [];
+      // add points between the original ones (never replace them) so cuts are precise and untouched parts keep their shape;
+      // pen pressure is interpolated along with them
+      const world = [], pressure = [], pressed = Array.isArray(el.pressure) && el.pressure.length === el.points.length;
       el.points.map((p) => applyTransform(el.transform, p)).forEach((p, i, all) => {
-        if (i === 0) return world.push(p);
+        if (i === 0) { world.push(p); if (pressed) pressure.push(el.pressure[0]); return; }
         const a = all[i - 1], n = Math.max(1, Math.ceil(Math.hypot(p[0] - a[0], p[1] - a[1]) / (radius / 3)));
-        for (let j = 1; j <= n; j++) world.push([a[0] + ((p[0] - a[0]) * j) / n, a[1] + ((p[1] - a[1]) * j) / n]);
+        for (let j = 1; j <= n; j++) {
+          world.push([a[0] + ((p[0] - a[0]) * j) / n, a[1] + ((p[1] - a[1]) * j) / n]);
+          if (pressed) pressure.push(el.pressure[i - 1] + ((el.pressure[i] - el.pressure[i - 1]) * j) / n);
+        }
       });
       const keep = world.map(([px, py]) => Math.hypot(px - x, py - y) > radius);
       if (keep.every(Boolean)) { out.push(el); continue; }
       changed = true;
-      let run = [], first = true;
+      // the pieces keep the stroke's brush, size, mode and colour
+      const { id, transform, points, pressure: _, ...brush } = el;
+      let run = [], runPressure = [], first = true;
       const flush = () => {
-        if (run.length >= 2) { out.push({ id: first ? el.id : newId(), type: "stroke", ...centred(run) }); first = false; }
-        run = [];
+        if (run.length >= 2) {
+          out.push({ ...brush, id: first ? id : newId(), ...centred(run), ...(pressed ? { pressure: runPressure } : {}) });
+          first = false;
+        }
+        run = []; runPressure = [];
       };
-      world.forEach((p, i) => (keep[i] ? run.push(p) : flush()));
+      world.forEach((p, i) => {
+        if (!keep[i]) return flush();
+        run.push(p);
+        if (pressed) runPressure.push(Math.round(pressure[i] * 1000) / 1000);
+      });
       flush();
     }
     return { elements: out, changed };
@@ -836,20 +856,87 @@ globalThis.WaveCore = (() => {
     return smoothLine(raw, (style.letters.smooth || 0) * 8, step);
   }
 
-  function ribbon(line, width, profile, step) {
+  // profile(t, tx, ty): share of the full width at t along the line, given the unit tangent there; round caps close both ends.
+  // With a nib angle (radians) the edges are offset along the nib instead of across the line, like a flat pen.
+  function ribbon(line, width, profile, step, roundCaps = false, nibAngle = null) {
     const sub = line.filter((_, i) => i % 3 === 0 || i === line.length - 1);
     const pts = resample(sub.length > 3 ? chaikin(sub, 1) : sub, step);
+    const end = line[line.length - 1], last = pts[pts.length - 1];
+    if (roundCaps && Math.hypot(end[0] - last[0], end[1] - last[1]) > step / 4) pts.push(end); // resampling stops short of the end; a cap must not
     if (pts.length < 3) return null;
-    const left = [], right = [];
+    const left = [], right = [], caps = [];
     for (let i = 0; i < pts.length; i++) {
       const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
-      const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
-      const w = (width / 2) * profile(i / (pts.length - 1));
-      left.push([pts[i][0] + nx * w, pts[i][1] + ny * w]);
-      right.push([pts[i][0] - nx * w, pts[i][1] - ny * w]);
+      const tx = (b[0] - a[0]) / len, ty = (b[1] - a[1]) / len, nx = -ty, ny = tx;
+      const w = (width / 2) * profile(i / (pts.length - 1), tx, ty);
+      let ox = nx * w, oy = ny * w;
+      if (nibAngle != null) { // a flat pen, w long and 12% as thick: each edge runs along the pen corner facing its side,
+        // so the edges never cross and the stroke never gets thinner than the pen's own thickness
+        const ux = Math.cos(nibAngle), uy = Math.sin(nibAngle), along = ux * nx + uy * ny, across = -uy * nx + ux * ny;
+        const sa = along < 0 ? -w : w, sc = across < 0 ? -0.12 * w : 0.12 * w;
+        ox = ux * sa - uy * sc; oy = uy * sa + ux * sc;
+      }
+      left.push([pts[i][0] + ox, pts[i][1] + oy]);
+      right.push([pts[i][0] - ox, pts[i][1] - oy]);
+      if (roundCaps && (i === 0 || i === pts.length - 1)) caps[i ? 1 : 0] = { c: pts[i], w, a0: Math.atan2(ny, nx) + (i ? 0 : Math.PI) };
     }
-    return left.concat(right.reverse());
+    if (!roundCaps) return left.concat(right.reverse());
+    // half circles swing from one side to the other around the end: forwards at the end, backwards at the start
+    const arc = ({ c, w, a0 }) => Array.from({ length: 7 }, (_, k) => [c[0] + w * Math.cos(a0 - ((k + 1) * Math.PI) / 8), c[1] + w * Math.sin(a0 - ((k + 1) * Math.PI) / 8)]);
+    return left.concat(arc(caps[1]), right.reverse(), arc(caps[0]));
+  }
+  // ---------- paint: brushes turn a stroke's centre line into a painted outline
+  // Strokes saved before brushes existed have none of these settings and open as hidden, tapered, automatic width.
+  const BRUSH_DEFAULTS = { brush: "tapered", size: "auto", mode: "hidden", nib: 45 };
+  const brushOf = (el) => {
+    const b = { ...BRUSH_DEFAULTS };
+    for (const key of Object.keys(BRUSH_DEFAULTS)) if (el[key] != null) b[key] = el[key];
+    return b;
+  };
+  // A paint colour is a hex colour, or a palette slot ("letter", "background" or a stroke colour index) that follows the palette
+  function paintColor(color, palette) {
+    if (typeof color === "string") return color;
+    const slot = color && color.palette;
+    if (slot === "background") return palette.background;
+    if (typeof slot === "number" && palette.strokes[slot]) return palette.strokes[slot].color;
+    return palette.letter;
+  }
+  const steadyProfile = (t) => Math.pow(Math.min(1, t / 0.05, (1 - t) / 0.1), 0.5);
+  // (t, tx, ty) -> share of the brush width along a stroke
+  function strokeProfile(el, style) {
+    const b = brushOf(el), e = style.letters.emphasis, taper = brushProfile(style.sea.taper);
+    let shape;
+    if (b.brush === "round") shape = () => 1;
+    else if (b.brush === "calligraphy") shape = () => 1; // the nib angle shapes it (see ribbon)
+    else if (b.mode === "hidden") shape = (t) => taper(t) * (1 - e) + steadyProfile(t) * e; // the hidden letter look
+    else shape = (t) => Math.pow(Math.sin(Math.PI * t), 0.5);
+    const pressure = el.pressure;
+    if (!pressure || pressure.length !== el.points.length || pressure.length < 2) return shape;
+    // pressure was recorded per painted point: spread it over the stroke's length
+    const along = [0];
+    for (let i = 1; i < el.points.length; i++) along.push(along[i - 1] + Math.hypot(el.points[i][0] - el.points[i - 1][0], el.points[i][1] - el.points[i - 1][1]));
+    const total = along[along.length - 1] || 1;
+    const at = (t) => {
+      let i = 1;
+      while (i < along.length - 1 && along[i] < t * total) i++;
+      const f = Math.max(0, Math.min(1, (t * total - along[i - 1]) / (along[i] - along[i - 1] || 1)));
+      return pressure[i - 1] + (pressure[i] - pressure[i - 1]) * f;
+    };
+    return (t, tx, ty) => shape(t, tx, ty) * (0.2 + 0.8 * at(t));
+  }
+  const dotRadius = (el, style) => (brushOf(el).size === "auto" ? 0.7 * style.sea.spacingMm : brushOf(el).size / 2);
+  // A stroke as painted, from its world centre line: the outline ring and the width it was painted at.
+  // autoWidth is used when the stroke's size is "auto" (the generator varies it like the sea; previews pass a fixed one).
+  function strokeOutline(el, style, line, autoWidth) {
+    const b = brushOf(el);
+    if (line.length === 1) { // a tap paints a round dot
+      const r = dotRadius(el, style);
+      return { ring: circleRing(r, 32).map(([x, y]) => [line[0][0] + x, line[0][1] + y]), width: 2 * r };
+    }
+    const width = b.size === "auto" ? autoWidth : b.size;
+    const nib = b.brush === "calligraphy" ? (b.nib * Math.PI) / 180 : null;
+    return { ring: ribbon(line, width, strokeProfile(el, style), style.sea.spacingMm / 4, b.brush === "round", nib), width };
   }
   // Continuous band: tapers only near its ends and swells/pinches along its length with slow noise.
   function bandProfile(line, dsep, sea, rng) {
@@ -1000,12 +1087,11 @@ globalThis.WaveCore = (() => {
     return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * f).toString(16).padStart(2, "0")).join("");
   }
 
-  function generate(design, quality = "full") {
+  function generate(design) {
     const { drawing, style } = design;
     const W = drawing.canvas.widthCm * 10, H = drawing.canvas.heightCm * 10;
     const sea = style.sea, dsep = sea.spacingMm;
-    const coarse = quality !== "full";
-    const step = dsep / (coarse ? 5 : 10);
+    const step = dsep / 10;
     const rng = mulberry32(sea.seed * 7919 + 17);
     const variety = style.variety;
     // uneven spacing: a slow noise field scales the local separation between 0.45x and 1.85x
@@ -1026,15 +1112,25 @@ globalThis.WaveCore = (() => {
     const blockers = []; // letters + obstacles, replayed into the overlay layer's packer
     const block = (pts, r) => { blockers.push([pts, r]); packer.add(pts, r); };
     const seeds = [];
-    const letterLines = [];
+    const letterLines = []; // { pts, el }: painted strokes, then woven outlines (el null)
     for (const el of drawing.elements) {
-      if (el.type !== "stroke" || el.points.length < 2) continue;
+      if (el.type !== "stroke" || !el.points.length) continue;
       const pts = letterPath(el, style, step);
-      block(pts, dsep / 2);
-      offsetSeeds(pts, dsep, seeds);
-      letterLines.push(pts);
+      if (brushOf(el).size === "auto" && pts.length > 1) {
+        block(pts, dsep / 2);
+        offsetSeeds(pts, dsep, seeds);
+      } else { // a sized brush or a dot: the painted shape is a solid obstacle, so the waves keep half a spacing clear of its edge
+        const { ring } = strokeOutline(el, style, pts, 0);
+        if (ring) {
+          const outline = resample(ring.concat([ring[0]]), step);
+          block(outline, dsep / 2);
+          offsetSeeds(outline, dsep, seeds);
+          block(interiorSamples([ring], dsep / 2), dsep / 2);
+        }
+      }
+      letterLines.push({ pts, el });
     }
-    const guides = letterLines.slice();
+    const guides = letterLines.filter((l) => l.pts.length > 1).map((l) => l.pts);
     const fills = [];
     const waveFilled = []; // regions filled with their own strokes after the sea
     const obstacleFigures = [];
@@ -1063,7 +1159,7 @@ globalThis.WaveCore = (() => {
             const outline = resample(ring.concat([ring[0]]), step);
             block(outline, dsep / 2);
             offsetSeeds(outline, dsep, seeds);
-            letterLines.push(outline);
+            letterLines.push({ pts: outline, el: null });
             guides.push(outline);
           }
           continue;
@@ -1080,7 +1176,7 @@ globalThis.WaveCore = (() => {
       }
     }
     const sigma = dsep * (0.6 + 4.4 * style.letters.bend);
-    const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3), guides, sigma);
+    const field = buildField(W, H, sea, dsep / 3, guides, sigma);
     // figures: surfers and boats riding on top of the sea along the flow, each trailing a foam wake; placed before the
     // sea so they only avoid letters and shapes, while the sea keeps running underneath
     const figures = obstacleFigures, wakes = [];
@@ -1238,13 +1334,18 @@ globalThis.WaveCore = (() => {
     });
 
     const e = style.letters.emphasis;
-    const steady = (t) => Math.pow(Math.min(1, t / 0.05, (1 - t) / 0.1), 0.5);
-    for (const line of letterLines) {
+    for (const { pts: line, el } of letterLines) {
       const width = dsep * (sea.width * (0.65 + 0.35 * rng()) * (1 - e) + 0.8 * e);
       const color = mixColor(pickStroke(style.palette, rng, false).color, style.palette.letter, e);
-      const lerped = (t) => profile(t) * (1 - e) + steady(t) * e;
-      const poly = ribbon(line, width, lerped, dsep / 4);
-      if (poly) ribbons.push({ points: poly, color, kind: "letter", width });
+      if (!el) { // a woven outline hides like a letter
+        const poly = ribbon(line, width, (t) => profile(t) * (1 - e) + steadyProfile(t) * e, dsep / 4);
+        if (poly) ribbons.push({ points: poly, color, kind: "letter", width });
+        continue;
+      }
+      const painted = strokeOutline(el, style, line, width);
+      if (!painted.ring) continue;
+      if (brushOf(el).mode === "visible") ribbons.push({ points: painted.ring, color: paintColor(el.color, style.palette), kind: "paint", width: painted.width });
+      else ribbons.push({ points: painted.ring, color, kind: "letter", width: painted.width });
     }
     // wakes: a foam trail that swells out of the tail and fades, with two thin lines spreading to the sides
     for (const { line, w0, color, figure: owner, stamp } of wakes) {
@@ -1263,7 +1364,7 @@ globalThis.WaveCore = (() => {
       }
     }
     const background = style.palette.transparent === "background" ? null : style.palette.background;
-    return { width: W, height: H, background, streamlines: lines, overlayStreamlines: overlayLines, letterStrokes: letterLines, ribbons, fills, figures };
+    return { width: W, height: H, background, streamlines: lines, overlayStreamlines: overlayLines, letterStrokes: letterLines.map((l) => l.pts), ribbons, fills, figures };
   }
 
   // ---------- SVG export: print file and editable source in one
@@ -1322,7 +1423,7 @@ globalThis.WaveCore = (() => {
     return migrateDesign(JSON.parse(unescapeXml(m[1])));
   }
 
-  return { defaultDesign, defaultStyle, JERSEY_SIZES, defaultBackPrint, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
+  return { brushOf, paintColor, strokeOutline, defaultDesign, defaultStyle, JERSEY_SIZES, defaultBackPrint, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
     exportStyle, parseStyle, centred, eraseStrokes, figure, registerFigures, figureList: () => [...FIGURES.values()], letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
 })();
 </script>
@@ -1344,11 +1445,13 @@ globalThis.WaveCore = (() => {
   let design = core.defaultDesign();
   let undoStack = [], redoStack = [], coalesce = null;
   let tool = "select", selectedId = null;
-  let geo = null, statusNote = "", viewMode = "sea"; // "sea" | "letters" | "jersey"
+  let geo = null, statusNote = "", viewMode = "sea"; // "sea" | "paint" | "jersey"
   // Phones have no pen, so there a finger draws (two fingers still pan and zoom)
   const PHONE = matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) < 600;
   const LETTER_BOAT = "letter-boat";
-  const ui = { eraserMm: 8, fingerDraws: PHONE, stampFigure: LETTER_BOAT };
+  // brush: what the next painted stroke gets (pressure is a painting-time switch, not stored on strokes)
+  const ui = { eraserMm: 8, fingerDraws: PHONE, stampFigure: LETTER_BOAT,
+    brush: { brush: "tapered", size: "auto", mode: "hidden", color: { palette: "letter" }, nib: 45, pressure: false } };
   $("finger-draws").checked = PHONE;
   const els = () => design.drawing.elements;
   const W = () => design.drawing.canvas.widthCm * 10, H = () => design.drawing.canvas.heightCm * 10;
@@ -1378,7 +1481,7 @@ globalThis.WaveCore = (() => {
     if (!els().some((e) => e.id === selectedId)) selectedId = null;
     if (viewMode !== "sea") paintSea(); // letter and jersey views show edits right away (the jersey again once the sea is regenerated)
     refreshControls();
-    schedulePreview(immediate);
+    scheduleRender(immediate);
     draw();
   }
   function undo() {
@@ -1406,20 +1509,20 @@ globalThis.WaveCore = (() => {
   const newId = () => "e" + Date.now().toString(36) + (idCounter++).toString(36);
 
   // ---------- generation
-  let previewTimer = null;
-  function schedulePreview(immediate) {
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => regenerate("preview"), immediate ? 0 : 80);
+  // one quality only: the canvas always shows exactly what gets exported
+  let renderTimer = null;
+  function scheduleRender(immediate) {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(regenerate, immediate ? 0 : 80);
   }
-  function regenerate(quality) {
-    clearTimeout(previewTimer);
+  function regenerate() {
+    clearTimeout(renderTimer);
     const t0 = performance.now();
-    geo = core.generate(design, quality);
+    geo = core.generate(design);
     const ms = Math.round(performance.now() - t0);
     paintSea();
     draw();
-    const label = quality === "full" ? "Full render" : "Preview";
-    setStatus(`${label} · ${geo.ribbons.length} strokes · ${ms} ms`);
+    setStatus(`${geo.ribbons.length} strokes · ${ms} ms`);
     return geo;
   }
   function setStatus(text) {
@@ -1496,7 +1599,9 @@ globalThis.WaveCore = (() => {
       fillRibbons(c, cut.map((r) => ({ ...r, color: "#000" })));
       c.globalCompositeOperation = "source-over";
     }
-    for (const kind of ["accent", "shapefill", "letter", "wake"]) fillRibbons(c, g.ribbons.filter((r) => r.kind === kind));
+    for (const kind of ["accent", "shapefill"]) fillRibbons(c, g.ribbons.filter((r) => r.kind === kind));
+    for (const r of g.ribbons) if (r.kind === "letter" || r.kind === "paint") fillRibbons(c, [r]); // in painted order, like the export
+    fillRibbons(c, g.ribbons.filter((r) => r.kind === "wake"));
     for (const f of g.fills) {
       const p = new Path2D();
       for (const ring of f.rings) {
@@ -1519,8 +1624,8 @@ globalThis.WaveCore = (() => {
       c.restore();
     }
   }
-  // Letter view: only what was painted, as clear marks on plain paper.
-  function paintLetters(c) {
+  // Paint view: only what was painted, on plain paper: strokes at their real brush shape, visible paint in its colour.
+  function paintPaint(c) {
     c.fillStyle = "#faf8f2";
     c.fillRect(0, 0, W(), H());
     c.lineJoin = c.lineCap = "round";
@@ -1533,24 +1638,28 @@ globalThis.WaveCore = (() => {
         }
         continue;
       }
-      const lines = el.type === "stroke" ? [core.letterPath(el, design.style, design.style.sea.spacingMm / 10)] : worldOutlines(el);
-      c.beginPath();
-      for (const line of lines) {
-        line.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-        if (el.type !== "stroke") c.closePath();
-      }
       if (el.type === "stroke") {
-        c.strokeStyle = "#1d2733";
-        c.lineWidth = design.style.sea.spacingMm * 0.6;
-        c.stroke();
-      } else {
-        const mode = el.type === "dot" ? "solid" : el.mode || "solid";
-        c.fillStyle = mode === "solid" ? "#1d2733" : mode === "filled" ? "rgba(47,111,163,.35)" : "transparent";
-        c.fill("evenodd");
-        c.strokeStyle = mode === "woven" ? "#1d2733" : "#2f6fa3";
-        c.lineWidth = mode === "woven" ? design.style.sea.spacingMm * 0.6 : 1 / k;
-        c.stroke();
+        const spacing = design.style.sea.spacingMm;
+        const { ring } = core.strokeOutline(el, design.style, core.letterPath(el, design.style, spacing / 10), spacing * 0.6);
+        if (!ring) continue;
+        c.beginPath();
+        ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+        c.closePath();
+        c.fillStyle = core.brushOf(el).mode === "visible" ? core.paintColor(el.color, design.style.palette) : "#1d2733";
+        c.fill();
+        continue;
       }
+      c.beginPath();
+      for (const line of worldOutlines(el)) {
+        line.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+        c.closePath();
+      }
+      const mode = el.type === "dot" ? "solid" : el.mode || "solid";
+      c.fillStyle = mode === "solid" ? "#1d2733" : mode === "filled" ? "rgba(47,111,163,.35)" : "transparent";
+      c.fill("evenodd");
+      c.strokeStyle = mode === "woven" ? "#1d2733" : "#2f6fa3";
+      c.lineWidth = mode === "woven" ? design.style.sea.spacingMm * 0.6 : 1 / k;
+      c.stroke();
     }
   }
   const figureImages = new Map();
@@ -1599,7 +1708,7 @@ globalThis.WaveCore = (() => {
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, seaCanvas.width, seaCanvas.height);
     c.setTransform(seaCanvas.width / stageW(), 0, 0, seaCanvas.height / stageH(), 0, 0);
-    if (viewMode === "letters") paintLetters(c);
+    if (viewMode === "paint") paintPaint(c);
     else if (viewMode === "jersey") paintJersey(c);
     else if (geo) paintGeometry(c, geo);
   }
@@ -1674,7 +1783,9 @@ globalThis.WaveCore = (() => {
     for (const line of core.localOutlines(el)) for (const [x, y] of line) {
       x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
     }
-    const pad = design.style.sea.spacingMm / 2 / el.transform.s; // thin strokes still get a grabbable box
+    const auto = el.type === "stroke" && el.points.length === 1 ? 0.7 * design.style.sea.spacingMm : 0; // an automatic-size dot
+    const half = el.type === "stroke" && typeof el.size === "number" ? el.size / 2 : auto;
+    const pad = Math.max(design.style.sea.spacingMm / 2, half) / el.transform.s; // thin strokes still get a grabbable box
     return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   }
   function toLocal(el, [x, y]) {
@@ -1713,8 +1824,9 @@ globalThis.WaveCore = (() => {
     ctx.lineJoin = ctx.lineCap = "round";
 
     if (drawing) {
-      ctx.strokeStyle = viewMode === "letters" ? "#1d2733" : design.style.palette.letter;
-      ctx.lineWidth = tool === "shape" ? 2 * px : design.style.sea.spacingMm * 0.6;
+      const b = ui.brush, visible = tool === "stroke" && b.mode === "visible";
+      ctx.strokeStyle = visible ? core.paintColor(b.color, design.style.palette) : viewMode === "paint" ? "#1d2733" : design.style.palette.letter;
+      ctx.lineWidth = tool === "shape" ? 2 * px : b.size === "auto" ? design.style.sea.spacingMm * 0.6 : b.size;
       ctx.beginPath();
       drawing.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
       if (tool === "shape") ctx.closePath();
@@ -1755,16 +1867,15 @@ globalThis.WaveCore = (() => {
   // ---------- tools
   const HINTS = {
     select: "Tap an element to select it. Drag to move, drag a corner to scale, drag the round handle to rotate.",
-    stroke: "Draw a letter stroke. The waves bend along it; a spiral makes a whirlpool.",
-    eraser: "Rub over letter strokes to remove parts of them. Shapes, dots and the boat are removed with Select + Delete.",
-    dot: "Tap to place a dot (like the dot on an i).",
+    stroke: "Paint with the brush; a tap paints a dot. The waves bend along what you paint; a spiral makes a whirlpool.",
+    eraser: "Rub over painted strokes to remove parts of them. Shapes, dots and the boat are removed with Select + Delete.",
     stamp: "Pick a figure, then tap to stamp it. Pictures ride on the waves and turn to the flow; the letter boat parts them.",
     shape: "Draw a closed outline. Choose Solid, Woven or Wave-filled for it under Selection.",
   };
   const NAV_HINT = PHONE ? " Two fingers pan and pinch to zoom." : " Pinch or scroll to zoom, two fingers or right-drag to pan.";
   const showCursor = () => (stage.style.cursor = viewMode === "jersey" ? "move" : tool === "select" ? "default" : tool === "eraser" ? "none" : "crosshair");
   const showHint = () => ($("hint").textContent = (viewMode === "jersey" ? "Drag to place the print on the back. Jersey sizes are estimates." : HINTS[tool]) + NAV_HINT);
-  let drawing = null, dragOp = null, eraseSession = 0;
+  let drawing = null, drawingPressure = null, dragOp = null, eraseSession = 0;
 
   function toMM(e) {
     const r = stage.getBoundingClientRect();
@@ -1777,6 +1888,7 @@ globalThis.WaveCore = (() => {
     showCursor();
     $("eraser-size").hidden = t !== "eraser";
     $("stamp-panel").hidden = t !== "stamp";
+    $("brush-panel").hidden = t !== "stroke";
     select(t === "select" ? selectedId : null);
   }
   function buildStampPicker() {
@@ -1914,7 +2026,7 @@ globalThis.WaveCore = (() => {
     core.registerFigures(list);
     figureStore.put(list).catch(() => toast("Could not store the figures in this browser; they last until you reload.", true));
     buildStampPicker();
-    schedulePreview(true);
+    scheduleRender(true);
   }
   let sheetKind = "surfer";
   $("import-surfers").addEventListener("click", () => { sheetKind = "surfer"; $("figure-sheet").click(); });
@@ -1949,7 +2061,7 @@ globalThis.WaveCore = (() => {
     for (const key of recoloured.keys()) if (key.startsWith(f.id + "[")) recoloured.delete(key);
     addFigures([flipped]);
   });
-  figureStore.all().then((list) => { if (list.length) { core.registerFigures(list); buildStampPicker(); schedulePreview(true); } }).catch(() => {});
+  figureStore.all().then((list) => { if (list.length) { core.registerFigures(list); buildStampPicker(); scheduleRender(true); } }).catch(() => {});
 
   function addElement(el) {
     mutate((d) => d.drawing.elements.push(el));
@@ -1963,11 +2075,10 @@ globalThis.WaveCore = (() => {
       dragOp = { mode: "print", before: JSON.stringify(design), start: { printX, printY }, p0: p };
     } else if (tool === "stroke" || tool === "shape") {
       drawing = [p];
+      drawingPressure = e.pointerType === "pen" && ui.brush.pressure ? [e.pressure] : null;
     } else if (tool === "eraser") {
       eraseSession++;
       eraseAt(p);
-    } else if (tool === "dot") {
-      addElement({ id: newId(), type: "dot", transform: { x: p[0], y: p[1], s: 1, r: 0 }, radius: design.style.sea.spacingMm * 0.7 });
     } else if (tool === "stamp") { // stays active so several stamps can be placed in a row
       const el = ui.stampFigure === LETTER_BOAT
         ? addElement({ id: newId(), type: "boat", mode: "solid", transform: { x: p[0], y: p[1], s: (H() * 0.18) / 113, r: 0 } })
@@ -1993,7 +2104,11 @@ globalThis.WaveCore = (() => {
     hover = p;
     if (drawing) {
       const last = drawing[drawing.length - 1];
-      if (Math.hypot(p[0] - last[0], p[1] - last[1]) >= Math.max(0.3, 2 / k)) { drawing.push(p); draw(); }
+      if (Math.hypot(p[0] - last[0], p[1] - last[1]) >= Math.max(0.3, 2 / k)) {
+        drawing.push(p);
+        if (drawingPressure) drawingPressure.push(e.pressure);
+        draw();
+      }
     } else if (dragOp) {
       const { el, start } = dragOp, t = el?.transform;
       if (dragOp.mode === "print") {
@@ -2017,8 +2132,15 @@ globalThis.WaveCore = (() => {
       drawing = null;
       let len = 0;
       for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
-      if (tool === "stroke" && len >= 3) {
-        addElement({ id: newId(), type: "stroke", ...core.centred(pts) });
+      if (tool === "stroke") {
+        const { brush, size, mode, color, nib } = ui.brush;
+        const settings = { brush, size, mode, color, ...(brush === "calligraphy" ? { nib } : {}) };
+        if (len >= 3) {
+          const pressure = drawingPressure && { pressure: drawingPressure.map((v) => Math.round(v * 1000) / 1000) };
+          addElement({ id: newId(), type: "stroke", ...core.centred(pts), ...settings, ...pressure });
+        } else { // a tap paints a dot
+          addElement({ id: newId(), type: "stroke", transform: { x: pts[0][0], y: pts[0][1], s: 1, r: 0 }, points: [[0, 0]], ...settings });
+        }
       } else if (tool === "shape" && pts.length >= 3 && len >= 10) {
         const { transform, points } = core.centred(pts);
         addElement({ id: newId(), type: "shape", mode: "solid", transform, color: design.style.palette.strokes[0].color, rings: [points] });
@@ -2166,14 +2288,76 @@ globalThis.WaveCore = (() => {
   slider(variety, { label: "Boat size", min: 3, max: 15, step: 0.5, fmt: (v) => v + " cm",
     get: (s) => s.variety.boatSize ?? 6, set: (s, v) => (s.variety.boatSize = v) });
   const letters = $("letter-controls");
-  slider(letters, { label: "Letter emphasis (hidden → visible)", min: 0, max: 1, step: 0.01, fmt: pct,
+  slider(letters, { label: "Hidden paint emphasis (hidden → visible)", min: 0, max: 1, step: 0.01, fmt: pct,
     get: (s) => s.letters.emphasis, set: (s, v) => (s.letters.emphasis = v) });
-  slider(letters, { label: "Smooth letters", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.letters.smooth, set: (s, v) => (s.letters.smooth = v) });
-  slider(letters, { label: "Flow bend along letters", min: 0, max: 1, step: 0.01, fmt: pct, get: (s) => s.letters.bend, set: (s, v) => (s.letters.bend = v) });
+  slider(letters, { label: "Smooth paint", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.letters.smooth, set: (s, v) => (s.letters.smooth = v) });
+  slider(letters, { label: "Flow bend along paint", min: 0, max: 1, step: 0.01, fmt: pct, get: (s) => s.letters.bend, set: (s, v) => (s.letters.bend = v) });
   slider(letters, { label: "Spacing", min: 3, max: 30, step: 0.5, fmt: mm, get: (s) => s.sea.spacingMm, set: (s, v) => (s.sea.spacingMm = v) });
   const edges = $("edge-controls");
   slider(edges, { label: "Border inset", min: 0, max: 80, step: 1, fmt: mm, get: (s) => s.edges.inset, set: (s, v) => (s.edges.inset = v) });
   slider(edges, { label: "Border waviness", min: 0, max: 40, step: 1, fmt: mm, get: (s) => s.edges.amplitude, set: (s, v) => (s.edges.amplitude = v) });
+
+  const BRUSHES = [["round", "Round", "Even width with round ends"], ["tapered", "Tapered", "Thin at both ends, like a paintbrush"],
+    ["calligraphy", "Calligraphy", "A flat nib: thick across it, thin along it"]];
+  const BRUSH_SIZES = ["auto", 2, 3, 4, 6, 8, 10, 12, 16, 20, 25, 30, 40, 60];
+  // get() -> brush settings, set(patch, key) applies a change; returns a refresh function
+  function brushControls(parent, get, set) {
+    const wrap = document.createElement("div");
+    wrap.className = "brush-controls";
+    wrap.innerHTML = `<div class="segmented" role="group" aria-label="Brush">${BRUSHES.map(([v, l, t]) => `<button data-brush="${v}" title="${t}">${l}</button>`).join("")}</div>
+      <div class="row">
+        <label class="field"><span>Size</span><select aria-label="Brush size">${BRUSH_SIZES.map((v) => `<option value="${v}">${v === "auto" ? "Auto" : v + " mm"}</option>`).join("")}</select></label>
+        <div class="segmented narrow" role="group" aria-label="Paint mode"><button data-mode="hidden" title="Melts into the waves in the sea's colours">Hidden</button><button data-mode="visible" title="Solid paint in its own colour">Visible</button></div>
+      </div>
+      <div class="swatches" role="group" aria-label="Paint colour"></div>
+      <label class="slider"><span>Nib angle<output></output></span><input type="range" min="0" max="180" step="5" aria-label="Nib angle"></label>`;
+    const [brushes, row, swatches, nibWrap] = wrap.children, size = row.querySelector("select"), nib = nibWrap.querySelector("input");
+    for (const b of brushes.children) b.addEventListener("click", () => set({ brush: b.dataset.brush }));
+    for (const b of row.querySelectorAll("[data-mode]")) b.addEventListener("click", () => set({ mode: b.dataset.mode }));
+    size.addEventListener("change", () => set({ size: size.value === "auto" ? "auto" : Number(size.value) }));
+    nib.addEventListener("input", () => set({ nib: Number(nib.value) }, "nib"));
+    parent.appendChild(wrap);
+    const refresh = () => {
+      const b = core.brushOf(get()), palette = design.style.palette;
+      for (const btn of brushes.children) btn.setAttribute("aria-pressed", String(btn.dataset.brush === b.brush));
+      for (const btn of row.querySelectorAll("[data-mode]")) btn.setAttribute("aria-pressed", String(btn.dataset.mode === b.mode));
+      size.value = String(b.size);
+      nib.value = b.nib;
+      nibWrap.querySelector("output").textContent = b.nib + "°";
+      nibWrap.hidden = b.brush !== "calligraphy";
+      swatches.hidden = b.mode !== "visible"; // hidden paint takes the sea's colours
+      // palette slots follow the palette; the custom picker stores a fixed colour
+      const slots = [["letter", "letters"], ...palette.strokes.map((_, i) => [i, `stroke colour ${i + 1}`]), ["background", "background"]];
+      if (swatches.children.length !== slots.length + 1) {
+        swatches.innerHTML = "";
+        for (const [slot, name] of slots) {
+          const btn = document.createElement("button");
+          btn.setAttribute("aria-label", `Paint colour: ${name}`);
+          btn.title = `The palette's ${name} colour (follows palette changes)`;
+          btn.addEventListener("click", () => set({ color: { palette: slot } }));
+          swatches.appendChild(btn);
+        }
+        const custom = document.createElement("input");
+        custom.type = "color";
+        custom.setAttribute("aria-label", "Custom paint colour");
+        custom.title = "A fixed colour of your own";
+        custom.addEventListener("input", () => set({ color: custom.value }, "paint-colour"));
+        swatches.appendChild(custom);
+      }
+      const current = get().color;
+      slots.forEach(([slot], i) => {
+        const btn = swatches.children[i];
+        btn.style.background = core.paintColor({ palette: slot }, palette);
+        btn.setAttribute("aria-pressed", String(!!current && typeof current === "object" && current.palette === slot));
+      });
+      const custom = swatches.lastElementChild;
+      if (document.activeElement !== custom) custom.value = core.paintColor(current, palette);
+    };
+    return refresh;
+  }
+  const refreshBrushPanel = brushControls($("brush-controls"), () => ui.brush, (patch) => { Object.assign(ui.brush, patch); refreshBrushPanel(); });
+  refreshers.push(refreshBrushPanel);
+  $("pen-pressure").addEventListener("change", (e) => { ui.brush.pressure = e.target.checked; });
 
   function checkbox(input, get, set) {
     input.addEventListener("change", () => mutate((d) => set(d.style, input.checked)));
@@ -2267,6 +2451,12 @@ globalThis.WaveCore = (() => {
           if (design.style.palette.strokes.length < 2) return;
           mutate((d) => {
             const p = d.style.palette;
+            // paint in this colour keeps it as a fixed colour; paint in later colours follows them to their new place
+            for (const el of d.drawing.elements) {
+              if (el.type !== "stroke" || !el.color || typeof el.color.palette !== "number") continue;
+              if (el.color.palette === i) el.color = p.strokes[i].color;
+              else if (el.color.palette > i) el.color = { palette: el.color.palette - 1 };
+            }
             p.strokes.splice(i, 1);
             if (p.transparent === i) p.transparent = null;
             else if (typeof p.transparent === "number" && p.transparent > i) p.transparent--;
@@ -2354,8 +2544,15 @@ globalThis.WaveCore = (() => {
       follow.title = "Forget the hand-set angle and follow the waves again";
       follow.addEventListener("click", () => update((e) => { e.mode = "riding"; e.transform.r = null; }));
       box.appendChild(follow);
+    } else if (el.type === "stroke") { // brush, size, mode and colour can all change after painting
+      const holder = document.createElement("div");
+      holder.style.gridColumn = "1 / -1";
+      box.appendChild(holder);
+      const refresh = brushControls(holder, () => selected() || el, (patch, key) => update((e) => Object.assign(e, patch), key && key + owner));
+      refresh();
+      selectionRefreshers.push(refresh);
     } else {
-      box.innerHTML = `<span style="color:var(--muted)">${el.type === "dot" ? "Dot" : "Letter stroke"}: colour follows the letter emphasis.</span>`;
+      box.innerHTML = `<span style="color:var(--muted)">Dot: colour follows the hidden paint emphasis.</span>`;
     }
   }
 
@@ -2388,7 +2585,7 @@ globalThis.WaveCore = (() => {
     if (!Object.values(groups).some(Boolean)) return toast("Tick at least one thing Surprise me may change.", true);
     const seed = Math.floor(Math.random() * 2 ** 31);
     mutate((d) => { d.style = core.surpriseStyle(d.style, groups, seed); });
-    const g = regenerate("preview");
+    const g = regenerate();
     history.unshift({ style: JSON.parse(JSON.stringify(design.style)), image: thumbnail(g) });
     history.length = Math.min(history.length, 12);
     renderHistory();
@@ -2453,7 +2650,7 @@ globalThis.WaveCore = (() => {
       mutate((d) => { d.style = style; });
       saveStyle(style, name);
       statusNote = `Applied style ${name}`;
-      setStatus("Preview");
+      setStatus("Rendering…");
     } catch (err) {
       toast(err.message, true);
     }
@@ -2478,7 +2675,7 @@ globalThis.WaveCore = (() => {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
   $("export-svg").addEventListener("click", () => {
-    const g = regenerate("full");
+    const g = regenerate();
     const hrefFor = (id) => design.style.palette.figureColours === "palette" && figureSource(id) instanceof HTMLCanvasElement
       ? figureSource(id).toDataURL("image/png") : core.figure(id).href;
     download(new Blob([core.exportSVG(design, g, hrefFor)], { type: "image/svg+xml" }), "wave-design.svg");
@@ -2490,7 +2687,7 @@ globalThis.WaveCore = (() => {
     if (pw > 16384 || ph > 16384 || pw * ph > 268e6) {
       return toast(`${pw} × ${ph} px is more than the browser can render. Lower the DPI or use the SVG export.`, true);
     }
-    const g = regenerate("full");
+    const g = regenerate();
     const c = document.createElement("canvas");
     c.width = pw; c.height = ph;
     const x = c.getContext("2d");
@@ -2604,7 +2801,7 @@ globalThis.WaveCore = (() => {
   // ---------- top bar + keyboard
   function setView(mode) {
     viewMode = mode;
-    for (const m of ["sea", "letters", "jersey"]) $("view-" + m).setAttribute("aria-pressed", String(m === mode));
+    for (const m of ["sea", "paint", "jersey"]) $("view-" + m).setAttribute("aria-pressed", String(m === mode));
     showHint();
     showCursor();
     Object.assign(view, { zoom: 1, x: 0, y: 0 });
@@ -2612,7 +2809,7 @@ globalThis.WaveCore = (() => {
     paintSea();
     draw();
   }
-  for (const m of ["sea", "letters", "jersey"]) $("view-" + m).addEventListener("click", () => setView(m));
+  for (const m of ["sea", "paint", "jersey"]) $("view-" + m).addEventListener("click", () => setView(m));
   const workspaceCentre = () => { const r = workspace.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
   $("zoom-in").addEventListener("click", () => zoomAt(...workspaceCentre(), 1.4));
   $("zoom-out").addEventListener("click", () => zoomAt(...workspaceCentre(), 1 / 1.4));
@@ -2621,7 +2818,6 @@ globalThis.WaveCore = (() => {
   $("undo").addEventListener("click", undo);
   $("redo").addEventListener("click", redo);
   $("delete").addEventListener("click", deleteSelected);
-  $("render-full").addEventListener("click", () => regenerate("full"));
   $("reset").addEventListener("click", () => {
     snapshot();
     coalesce = null;
@@ -2635,7 +2831,7 @@ globalThis.WaveCore = (() => {
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); }
     else if (!mod) {
-      const t = { v: "select", l: "stroke", e: "eraser", d: "dot", b: "stamp", s: "shape" }[e.key.toLowerCase()];
+      const t = { v: "select", p: "stroke", e: "eraser", b: "stamp", s: "shape" }[e.key.toLowerCase()];
       if (t) setTool(t);
     }
   });
@@ -2647,7 +2843,7 @@ globalThis.WaveCore = (() => {
   setTool("select");
   renderLibrary();
   refreshControls();
-  regenerate("preview");
+  regenerate();
 })();
 </script>
 </body>

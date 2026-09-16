@@ -49,9 +49,9 @@ function worldPoints(el) {
   return el.points.map(([px, py]) => [x + s * (Math.cos(r) * px - Math.sin(r) * py), y + s * (Math.sin(r) * px + Math.cos(r) * py)]);
 }
 
-test("drawing with the letter tool adds a stroke to the exported design", async () => {
+test("painting with the brush adds a stroke to the exported design", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.3, 0.3], [0.3, 0.6]);
 
   const d = await exportedDesign(page);
@@ -83,7 +83,7 @@ test("a placed boat can be moved, and undo puts it back", async () => {
 
 test("an exported SVG reopens with the same design", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Dot", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
   await page.getByLabel("Seed", { exact: true }).fill("42");
   await page.getByLabel("Seed", { exact: true }).press("Enter");
@@ -95,7 +95,7 @@ test("an exported SVG reopens with the same design", async () => {
   const reopened = await exportedDesign(fresh);
   assert.deepStrictEqual(reopened, core.loadDesignFromSVG(svg.toString("utf8")));
   assert.strictEqual(reopened.style.sea.seed, 42);
-  assert.strictEqual(reopened.drawing.elements[0].type, "dot");
+  assert.strictEqual(reopened.drawing.elements[0].type, "stroke");
 });
 
 test("PNG export size follows the canvas size in cm and the DPI", async () => {
@@ -112,7 +112,7 @@ test("PNG export size follows the canvas size in cm and the DPI", async () => {
 
 test("clicking an element selects it so it can be deleted", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Dot", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
   await page.getByRole("button", { name: "Select", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
@@ -135,7 +135,7 @@ test("a selection colour picker keeps working across repeated changes", async ()
 
 test("reset starts a fresh default design, and undo brings the old one back", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Dot", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await page.mouse.click(...(await at(page, 0.4, 0.4)));
   await page.getByLabel("Seed", { exact: true }).fill("42");
   await page.getByLabel("Seed", { exact: true }).press("Enter");
@@ -151,7 +151,7 @@ test("reset starts a fresh default design, and undo brings the old one back", as
 
 test("the eraser cuts a letter stroke in two", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
   await page.getByRole("button", { name: "Eraser", exact: true }).click();
   await drag(page, [0.5, 0.45], [0.5, 0.55], 10);
@@ -164,7 +164,7 @@ test("the eraser cuts a letter stroke in two", async () => {
 
 test("Surprise me changes only the ticked style groups, keeps the drawing, and history jumps back", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.3, 0.3], [0.3, 0.6]);
   const before = await exportedDesign(page);
 
@@ -190,13 +190,13 @@ test("a style exported from the library applies to another drawing", async () =>
   const styleJson = fs.readFileSync(await file.path());
 
   const other = await openTool();
-  await other.getByRole("button", { name: "Dot", exact: true }).click();
+  await other.getByRole("button", { name: "Brush", exact: true }).click();
   await other.mouse.click(...(await at(other, 0.5, 0.5)));
   await other.locator("#import-style").setInputFiles({ name: "look.json", mimeType: "application/json", buffer: styleJson });
   await other.getByRole("status").filter({ hasText: /applied style/i }).waitFor();
   const applied = await exportedDesign(other);
   assert.deepStrictEqual(applied.style, styled.style);
-  assert.strictEqual(applied.drawing.elements[0].type, "dot");
+  assert.strictEqual(applied.drawing.elements[0].type, "stroke");
 });
 
 test("a selected shape can be switched to woven", async () => {
@@ -227,7 +227,7 @@ async function touch(page, frames) {
 
 test("a pen draws, while a finger pans and two fingers zoom instead of drawing", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await penDrag(page, [0.3, 0.3], [0.3, 0.6]);
   assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1, "pen stroke");
 
@@ -248,11 +248,11 @@ const pixelAt = (page, fx, fy) => page.evaluate(([fx, fy]) => {
   return [...c.getContext("2d").getImageData(Math.floor(fx * c.width), Math.floor(fy * c.height), 1, 1).data];
 }, [fx, fy]);
 
-test("letter view shows the painted letters on plain paper without the sea", async () => {
+test("paint view shows the painted strokes on plain paper without the sea", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.5, 0.2], [0.5, 0.8], 20);
-  await page.getByRole("button", { name: "Letter view" }).click();
+  await page.getByRole("button", { name: "Paint view", exact: true }).click();
   assert.deepStrictEqual(await pixelAt(page, 0.2, 0.5), [250, 248, 242, 255], "paper, no waves");
   assert.deepStrictEqual(await pixelAt(page, 0.5, 0.5), [29, 39, 51, 255], "the painted stroke");
 });
@@ -307,7 +307,7 @@ async function penEvent(page, type, [fx, fy], buttons) {
 
 test("a pen hovering over a stroke with the eraser does not erase", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
   await page.getByRole("button", { name: "Eraser", exact: true }).click();
   for (let fy = 0.44; fy <= 0.56; fy += 0.005) await penEvent(page, "mouseMoved", [0.5, fy], 0);
@@ -316,7 +316,7 @@ test("a pen hovering over a stroke with the eraser does not erase", async () => 
 
 test("a palm resting while the pen draws does not erase after the pen lifts", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
   await page.getByRole("button", { name: "Eraser", exact: true }).click();
   const cdp = await cdpFor(page);
@@ -332,7 +332,7 @@ test("a palm resting while the pen draws does not erase after the pen lifts", as
 
 test("erasing near one end keeps the far end of the stroke exactly", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   await drag(page, [0.2, 0.5], [0.8, 0.5], 30);
   const original = worldPoints((await exportedDesign(page)).drawing.elements[0]);
   const farEnd = original.reduce((a, p) => (p[0] > a[0] ? p : a));
@@ -345,25 +345,26 @@ test("erasing near one end keeps the far end of the stroke exactly", async () =>
   assert.ok(Math.hypot(end[0] - farEnd[0], end[1] - farEnd[1]) < 0.5, `far end moved from ${farEnd} to ${end}`);
 });
 
-test("letter view shows the smoothed letters when smoothing is on", async () => {
+test("paint view shows the smoothed strokes when smoothing is on", async () => {
   const page = await openTool();
-  await page.getByRole("button", { name: "Letter", exact: true }).click();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
   // zigzag across the middle: 12 mm up and down every 8 mm (canvas is 297 x 420 mm)
   const pts = Array.from({ length: 21 }, (_, i) => [(68 + i * 8) / 297, (210 + (i % 2 ? 12 : -12)) / 420]);
   await page.mouse.move(...(await at(page, ...pts[0])));
   await page.mouse.down();
   for (const p of pts.slice(1)) await page.mouse.move(...(await at(page, ...p)), { steps: 4 });
   await page.mouse.up();
-  await page.getByRole("button", { name: "Letter view" }).click();
-  const peak = [(68 + 10 * 8) / 297, (210 - 12) / 420];
+  await page.getByRole("button", { name: "Paint view", exact: true }).click();
+  // 2 mm inside a zigzag tip: the painted outline (like the print) rounds off the very tip
+  const peak = [(68 + 10 * 8) / 297, (210 - 10) / 420];
   assert.deepStrictEqual(await pixelAt(page, ...peak), [29, 39, 51, 255], "raw zigzag peak is inked");
 
-  await page.locator("summary", { hasText: "Letters" }).click();
-  await page.getByRole("slider", { name: "Smooth letters" }).fill("1");
+  await page.locator("summary", { hasText: "Hidden paint" }).click();
+  await page.getByRole("slider", { name: "Smooth paint" }).fill("1");
   assert.deepStrictEqual(await pixelAt(page, ...peak), [250, 248, 242, 255], "smoothed letter no longer reaches the peak");
 });
 
-test("on a phone the canvas and the tools both fit on screen, and a finger draws a letter", async () => {
+test("on a phone the canvas and the tools both fit on screen, and a finger paints a stroke", async () => {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e));
@@ -373,10 +374,10 @@ test("on a phone the canvas and the tools both fit on screen, and a finger draws
   assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth), 390, "no sideways scrolling");
   const stage = await page.locator("#stage").boundingBox();
   assert.ok(stage.y >= 0 && stage.y + stage.height <= 844 && stage.height > 250, `canvas on screen: ${JSON.stringify(stage)}`);
-  const letter = await page.getByRole("button", { name: "Letter", exact: true }).boundingBox();
-  assert.ok(letter.y + letter.height <= 844 && letter.height >= 40, `Letter tool reachable and finger-sized: ${JSON.stringify(letter)}`);
+  const letter = await page.getByRole("button", { name: "Brush", exact: true }).boundingBox();
+  assert.ok(letter.y + letter.height <= 844 && letter.height >= 40, `Brush tool reachable and finger-sized: ${JSON.stringify(letter)}`);
 
-  await page.getByRole("button", { name: "Letter", exact: true }).tap();
+  await page.getByRole("button", { name: "Brush", exact: true }).tap();
   await touch(page, [0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6].map((f) => [[stage.x + 0.4 * stage.width, stage.y + f * stage.height]]));
   assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 1, "finger stroke");
   assert.deepStrictEqual(errors, []);
@@ -454,7 +455,7 @@ test("figures can be recoloured into the palette so they blend into the sea", as
   const before = await page.locator("#status").innerText();
   await page.mouse.click(...(await at(page, 0.5, 0.5)));
   await page.waitForFunction((t) => document.getElementById("status").textContent !== t, before);
-  await page.getByRole("button", { name: "Letter", exact: true }).click(); // no orange selection frame in the way
+  await page.getByRole("button", { name: "Brush", exact: true }).click(); // no orange selection frame in the way
   // the default palette is blue and cream; the painted surfer (skin, orange board) is clearly warm
   const warm = () => page.evaluate(() => {
     const c = document.getElementById("stage"), r = Math.round(c.width * 0.08);
@@ -658,7 +659,8 @@ test("a bigger jersey size makes the same print look smaller on the shirt", asyn
   const small = await printShare();
   await page.getByLabel("Jersey size").selectOption("XXL");
   const big = await printShare();
-  assert.ok(small > 0.2 && big < small * 0.9, `print share on S ${small}, on XXL ${big}`);
+  assert.ok(small > 0.2 && big < small * 0.95, // lengths 70 -> 78 cm: expected share ratio 0.9
+    `print share on S ${small}, on XXL ${big}`);
   assert.deepStrictEqual(page.errors, []);
 });
 
@@ -684,3 +686,91 @@ for (const [device, width, height] of [["an iPad in portrait", 820, 1180], ["an 
     assert.deepStrictEqual(errors, []);
   });
 }
+
+test("the canvas shows exactly the waves that get exported, so there is no separate full render", async () => {
+  const page = await openTool();
+  const shown = Number(/(\d+) strokes/.exec(await page.locator("#status").innerText())[1]);
+  const svg = (await download(page, "Export SVG")).toString("utf8");
+  assert.strictEqual((svg.match(/<path /g) || []).length, shown, "the default design has no fills: one path per stroke on the canvas");
+  assert.strictEqual(await page.getByRole("button", { name: "Render full" }).count(), 0);
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("brush settings picked before painting land on the stroke, and a tap paints a dot", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await page.getByRole("button", { name: "Round", exact: true }).click();
+  await page.getByLabel("Brush size").selectOption({ label: "12 mm" });
+  await page.getByRole("button", { name: "Visible", exact: true }).click();
+  await page.getByLabel("Custom paint colour").fill("#ff00aa");
+  await drag(page, [0.3, 0.3], [0.3, 0.6]);
+  await page.mouse.click(...(await at(page, 0.7, 0.5)));
+
+  const [stroke, dot] = (await exportedDesign(page)).drawing.elements;
+  const settings = (el) => ({ type: el.type, brush: el.brush, size: el.size, mode: el.mode, color: el.color });
+  const expected = { type: "stroke", brush: "round", size: 12, mode: "visible", color: "#ff00aa" };
+  assert.deepStrictEqual(settings(stroke), expected);
+  assert.ok(stroke.points.length > 2);
+  assert.deepStrictEqual(settings(dot), expected);
+  assert.strictEqual(dot.points.length, 1, "a tap is a one-point stroke");
+  assert.ok(Math.abs(dot.transform.x / 297 - 0.7) < 0.02 && Math.abs(dot.transform.y / 420 - 0.5) < 0.02, `dot at ${dot.transform.x}, ${dot.transform.y}`);
+  assert.strictEqual(await page.getByRole("button", { name: "Dot", exact: true }).count(), 0, "no separate Dot tool");
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("a selected stroke's brush, size, mode and colour can be changed after painting", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await drag(page, [0.5, 0.3], [0.5, 0.6]);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.5, 0.45)));
+
+  const panel = page.locator("#selection-panel");
+  await panel.getByRole("button", { name: "Calligraphy", exact: true }).click();
+  await panel.getByLabel("Brush size").selectOption({ label: "20 mm" });
+  await panel.getByRole("button", { name: "Visible", exact: true }).click();
+  await panel.getByRole("button", { name: "Paint colour: stroke colour 2", exact: true }).click();
+  await panel.getByRole("slider", { name: "Nib angle" }).fill("90");
+
+  const [stroke] = (await exportedDesign(page)).drawing.elements;
+  assert.deepStrictEqual(JSON.parse(JSON.stringify({ brush: stroke.brush, size: stroke.size, mode: stroke.mode, color: stroke.color, nib: stroke.nib })),
+    { brush: "calligraphy", size: 20, mode: "visible", color: { palette: 1 }, nib: 90 });
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("paint view shows a visible stroke in its colour at its brush width", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await page.getByRole("button", { name: "Round", exact: true }).click();
+  await page.getByLabel("Brush size").selectOption({ label: "20 mm" });
+  await page.getByRole("button", { name: "Visible", exact: true }).click();
+  await page.getByLabel("Custom paint colour").fill("#ff0000");
+  await drag(page, [0.5, 0.2], [0.5, 0.8], 20);
+  await page.getByRole("button", { name: "Paint view", exact: true }).click();
+
+  // the canvas is 297 mm wide: 20 mm of red centred on x = 0.5
+  const mm = (dx) => 0.5 + dx / 297;
+  assert.deepStrictEqual(await pixelAt(page, 0.5, 0.5), [255, 0, 0, 255], "painted centre");
+  assert.deepStrictEqual(await pixelAt(page, mm(8), 0.5), [255, 0, 0, 255], "8 mm out: still paint");
+  assert.deepStrictEqual(await pixelAt(page, mm(12), 0.5), [250, 248, 242, 255], "12 mm out: paper");
+  assert.deepStrictEqual(page.errors, []);
+});
+
+test("removing a palette colour keeps the colour of visible paint that used it or a later one", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Brush", exact: true }).click();
+  await page.getByRole("button", { name: "Visible", exact: true }).click();
+  await page.getByRole("button", { name: "Paint colour: stroke colour 2", exact: true }).click();
+  await drag(page, [0.3, 0.3], [0.3, 0.6]);
+  await page.getByRole("button", { name: "Paint colour: stroke colour 3", exact: true }).click();
+  await drag(page, [0.6, 0.3], [0.6, 0.6]);
+  const before = (await exportedDesign(page)).style.palette.strokes.map((s) => s.color);
+
+  await page.locator("summary", { hasText: "Colours" }).click();
+  await page.getByRole("button", { name: "Remove colour 2", exact: true }).click();
+  const d = await exportedDesign(page);
+  const [removed, shifted] = d.drawing.elements;
+  assert.strictEqual(removed.color, before[1], "the removed colour stays on its paint as a fixed colour");
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(shifted.color)), { palette: 1 }, "a later colour keeps following its palette slot");
+  assert.strictEqual(d.style.palette.strokes[1].color, before[2]);
+});

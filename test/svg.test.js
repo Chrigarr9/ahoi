@@ -22,7 +22,7 @@ function sampleDesign() {
 test("exported SVG has physical size and one path per ribbon and fill", () => {
   const d = sampleDesign();
   d.style.palette.transparent = null;
-  const geo = core.generate(d, "full");
+  const geo = core.generate(d);
   const svg = core.exportSVG(d, geo);
 
   assert.match(svg, /<svg[^>]* width="20cm" height="25cm" viewBox="0 0 200 250"/);
@@ -32,7 +32,7 @@ test("exported SVG has physical size and one path per ribbon and fill", () => {
 
 test("reopening an exported SVG restores the exact design", () => {
   const d = sampleDesign();
-  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const svg = core.exportSVG(d, core.generate(d));
   // JSON round-trip on both sides: the core runs in its own VM realm with its own Object prototype
   const plain = (o) => JSON.parse(JSON.stringify(o));
   assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg)), plain(d));
@@ -71,12 +71,12 @@ test("a version 1 design file opens as drawing + style", () => {
 test("transparent background exports without a background, cut-out strokes as a mask", () => {
   const d = sampleDesign();
   d.style.palette.transparent = "background";
-  let geo = core.generate(d, "preview");
+  let geo = core.generate(d);
   let svg = core.exportSVG(d, geo);
   assert.doesNotMatch(svg, /<rect width="200" height="250" fill=/);
 
   d.style.palette.transparent = 1;
-  geo = core.generate(d, "preview");
+  geo = core.generate(d);
   svg = core.exportSVG(d, geo);
   const cut = geo.ribbons.filter((r) => r.cutout).length;
   assert.ok(cut > 0);
@@ -109,7 +109,7 @@ test("a style file round-trips with its name and fills in settings added later",
 test("exported SVG embeds each used figure picture once and places every figure", () => {
   const d = sampleDesign();
   d.style.variety.surfers = 1;
-  const geo = core.generate(d, "full");
+  const geo = core.generate(d);
   assert.ok(geo.figures.length > 0);
   const svg = core.exportSVG(d, geo);
   const used = new Set(geo.figures.map((s) => s.figure));
@@ -122,7 +122,7 @@ test("exported SVG embeds each used figure picture once and places every figure"
 test("a design saved before the jersey existed opens with the default back print", () => {
   const d = sampleDesign();
   delete d.drawing.jersey;
-  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const svg = core.exportSVG(d, core.generate(d));
   const plain = (o) => JSON.parse(JSON.stringify(o));
   assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "M", color: "#86C4E3", printX: 0, printY: 8 });
 });
@@ -130,7 +130,18 @@ test("a design saved before the jersey existed opens with the default back print
 test("jersey size, colour and print position survive export and reopen", () => {
   const d = sampleDesign();
   d.drawing.jersey = { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 };
-  const svg = core.exportSVG(d, core.generate(d, "preview"));
+  const svg = core.exportSVG(d, core.generate(d));
   const plain = (o) => JSON.parse(JSON.stringify(o));
   assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg).drawing.jersey), { size: "XL", color: "#d8433a", printX: -3.5, printY: 12.25 });
+});
+
+test("brush, size, mode, colour, nib and pen pressure of painted strokes survive export and reopen", () => {
+  const d = sampleDesign();
+  d.drawing.elements.push(
+    { id: "c", type: "stroke", transform: { x: 60, y: 60, s: 1, r: 0 }, points: [[0, 0], [20, 10], [40, 0]], brush: "calligraphy", size: 12, mode: "visible",
+      color: { palette: 1 }, nib: 60, pressure: [0.2, 0.9, 0.5] },
+    { id: "t", type: "stroke", transform: { x: 150, y: 40, s: 1, r: 0 }, points: [[0, 0]], brush: "round", size: 8, mode: "visible", color: "#aa3300" });
+  const svg = core.exportSVG(d, core.generate(d));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg)).drawing.elements, plain(d.drawing.elements));
 });
