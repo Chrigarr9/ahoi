@@ -522,3 +522,36 @@ test("wave height makes each line itself rise and fall along its length", () => 
   assert.ok(flat < 0.3, `flat sea flips ${flat.toFixed(2)} per 100 mm`);
   assert.ok(wavy > 2, `wavy sea flips only ${wavy.toFixed(2)} per 100 mm (expect ~3.3 for a 60 mm wavelength)`);
 });
+
+// ---------- paint: brushes, sizes, hidden or visible strokes
+const distanceToLine = (line, [x, y]) => Math.min(...line.map(([px, py]) => Math.hypot(px - x, py - y)));
+
+test("a visible stroke is painted in its own colour at its brush size, and the waves keep half a spacing clear of its edge", () => {
+  const d = design();
+  const spacing = d.style.sea.spacingMm;
+  d.drawing.elements = [{ ...verticalStroke(), brush: "round", size: 20, mode: "visible", color: "#c0392b" }];
+  const out = core.generate(d);
+
+  const [paint] = out.ribbons.filter((r) => r.kind === "paint");
+  assert.ok(paint, "no paint ribbon");
+  assert.strictEqual(out.ribbons.filter((r) => r.kind === "letter").length, 0, "a visible stroke is not a hidden letter");
+  assert.strictEqual(paint.color, "#c0392b");
+  // mid-stroke the round brush is 20 mm across: its outline sits 10 mm either side of x = 100
+  const mid = paint.points.filter(([, y]) => y > 100 && y < 140).map(([x]) => x);
+  assert.ok(Math.abs(Math.min(...mid) - 90) < 0.5 && Math.abs(Math.max(...mid) - 110) < 0.5, `painted from ${Math.min(...mid)} to ${Math.max(...mid)}`);
+  // the round cap reaches half the brush past the end (the shared resampler may stop one 0.8 mm step short of the last point)
+  assert.ok(Math.max(...paint.points.map(([, y]) => y)) > 210 - 0.9, "round cap past the stroke's last point");
+  const waves = out.streamlines.flat();
+  assert.ok(waves.every(([x, y]) => !core.insideRings([paint.points], x, y)), "a wave runs through the paint");
+  const nearest = Math.min(...waves.map((p) => distanceToLine(paint.points, p)));
+  assert.ok(nearest >= spacing / 2, `a wave comes within ${nearest} mm of the painted edge`);
+});
+
+test("strokes painted before brushes existed generate exactly like hidden, tapered, automatic-width strokes", () => {
+  const old = design();
+  old.drawing.elements = [verticalStroke(), { id: "z", type: "stroke", transform: { x: 30, y: 60, s: 1.2, r: 0.3 }, points: [[0, 0], [20, 30], [60, 10]] }];
+  const explicit = JSON.parse(JSON.stringify(old));
+  for (const el of explicit.drawing.elements) Object.assign(el, { brush: "tapered", size: "auto", mode: "hidden", nib: 45 });
+  assert.strictEqual(JSON.stringify(core.generate(explicit)), JSON.stringify(core.generate(old)));
+  assert.strictEqual(core.generate(old).ribbons.filter((r) => r.kind === "letter").length, 2);
+});
