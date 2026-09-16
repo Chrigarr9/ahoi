@@ -801,6 +801,7 @@ globalThis.WaveCore = (() => {
       const line = back.reverse().concat([[x, y]], fwd);
       if ((line.length - 1) * step < 1.25 * dsep) continue;
       packer.add(line, (px, py) => spacingAt(px, py) / 2);
+      line.seed = [x, y];
       lines.push(line);
       offsetSeeds(line, spacingAt, queue);
     }
@@ -1105,9 +1106,48 @@ globalThis.WaveCore = (() => {
     const edges = style.edges;
     const edgeAt = (t, lane) =>
       edges.inset + edges.amplitude * Math.max(-1, Math.min(1, fbm(t / (sea.scale * 0.35), lane, sea.seed + 311) / 1.2));
-    const inBorder = (x, y) => !edges.enabled || !(
-      (edges.top && y < edgeAt(x, 1.5)) || (edges.bottom && y > H - edgeAt(x, 7.5)) ||
-      (edges.left && x < edgeAt(y, 13.5)) || (edges.right && x > W - edgeAt(y, 19.5)));
+    // how far inside the border (x, y) lies, in mm across the edge; negative outside, Infinity without a border
+    const edgeDistance = (x, y) => !edges.enabled ? Infinity : Math.min(
+      edges.top ? y - edgeAt(x, 1.5) : Infinity, edges.bottom ? H - edgeAt(x, 7.5) - y : Infinity,
+      edges.left ? x - edgeAt(y, 13.5) : Infinity, edges.right ? W - edgeAt(y, 19.5) - x : Infinity);
+    const inBorder = (x, y) => edgeDistance(x, y) >= 0;
+    // Streamlines are packed as if there were no border and then cut back to it, so moving the border only changes the
+    // strokes that reach it. Within the fade width they break into shorter dashes, get thinner and fewer towards the border.
+    const fade = { width: edges.fadeWidth || 0, shorter: edges.fadeShorter || 0, thinner: edges.fadeThinner || 0, sparser: edges.fadeSparser || 0 };
+    const edgeFade = (x, y) => {
+      const d = edgeDistance(x, y);
+      return d < 0 ? 1 : fade.width > 0 ? Math.max(0, 1 - d / fade.width) : 0;
+    };
+    // the pieces of a streamline that are drawn, each with its fade (0 away from the border .. 1 at it) per point
+    function atBorder(line, rng) {
+      const f = line.map(([x, y]) => edgeFade(x, y));
+      if (f.every((v) => v === 0)) return [line];
+      const pieces = [], total = (line.length - 1) * step;
+      let run = [], runFade = [], gap = 0;
+      const flush = () => {
+        const mean = runFade.reduce((a, v) => a + v, 0) / (runFade.length || 1);
+        if ((run.length - 1) * step >= dsep && rng() >= fade.sparser * mean) pieces.push(Object.assign(run, { seed: line.seed, fade: runFade }));
+        run = []; runFade = [];
+      };
+      for (let i = 0; i < line.length; i++) {
+        if (f[i] >= 1) { flush(); continue; }
+        if (gap > 0) { gap -= step; continue; }
+        run.push(line[i]); runFade.push(f[i]);
+        if (fade.shorter && (run.length - 1) * step >= total * (1 - 0.85 * fade.shorter * f[i])) {
+          flush();
+          gap = dsep * 0.6 * fade.shorter * f[i];
+        }
+      }
+      flush();
+      return pieces;
+    }
+    const reversed = (piece) => Object.assign(piece.slice().reverse(), { fade: piece.fade && piece.fade.slice().reverse() });
+    const thinned = (piece, shape) => (!piece.fade || !fade.thinner ? shape
+      : (t, tx, ty) => shape(t, tx, ty) * (1 - 0.85 * fade.thinner * piece.fade[Math.round(t * (piece.fade.length - 1))]));
+    // Randomness tied to where a stroke starts (cells of half a spacing) instead of drawing order: a stroke that stays put
+    // keeps its colour, width and direction whatever changes elsewhere
+    const cell = dsep / 2;
+    const spotRng = ([x, y], salt) => mulberry32((hash2(Math.floor(x / cell), Math.floor(y / cell), sea.seed * 16 + salt) * 2 ** 30) | 0);
     const packer = new Packer(dsep * (variety.spacing ? 1.85 : 1));
     const blockers = []; // letters + obstacles, replayed into the overlay layer's packer
     const block = (pts, r) => { blockers.push([pts, r]); packer.add(pts, r); };
@@ -1182,7 +1222,7 @@ globalThis.WaveCore = (() => {
     const figures = obstacleFigures, wakes = [];
     const foam = style.palette.strokes.filter((_, i) => i !== style.palette.transparent).map((c) => c.color)
       .concat([style.palette.letter]).sort((a, b) => luminance(b) - luminance(a))[0];
-    const clear = ([px, py], r) => px > 0 && py > 0 && px < W && py < H && inBorder(px, py) && packer.free(px, py, r, 1);
+    const clear = ([px, py], r) => px > 0 && py > 0 && px < W && py < H && packer.free(px, py, r, 1);
     // A figure at (x, y) heading along `dir`: fits clear of letters and other figures, with room behind for its wake
     function ride(id, x, y, dir, length) {
       const f = figure(id), width = (length * f.h) / f.w, [ux, uy] = dir;
@@ -1190,6 +1230,7 @@ globalThis.WaveCore = (() => {
       for (let a = -length / 2; a <= length / 2 + 1e-6; a += length / Math.ceil(length / (dsep / 2))) {
         for (let b = -width / 2; b <= width / 2 + 1e-6; b += width / Math.max(1, Math.ceil(width / (dsep / 2)))) {
           if (!clear(at(a, b), dsep * 0.3)) return null;
+          if (!inBorder(...at(a, b))) return null;
         }
       }
       if (figures.some((o) => Math.hypot(o.x - x, o.y - y) < (Math.max(o.length, o.width) + Math.max(length, width)) / 2)) return null;
@@ -1257,19 +1298,23 @@ globalThis.WaveCore = (() => {
     }
 
     const bands = sea.strokeType === "bands"; // bands run as far as the flow and neighbours allow
-    const lines = streamlines(W, H, field, packer, seeds, spacingAt, step, bands ? 4 * (W + H) : sea.length, rng, inBorder);
-
+    const seaLength = bands ? 4 * (W + H) : sea.length;
+    const lines = [];
     const profile = brushProfile(sea.taper);
     const ribbons = [];
-    for (let line of lines) {
-      if (rng() < 0.5) line = line.slice().reverse();
-      const r = rng();
-      const mid = line[line.length >> 1];
+    for (const whole of streamlines(W, H, field, packer, seeds, spacingAt, step, seaLength, rng)) {
+      const lrng = spotRng(whole.seed, 1);
+      const flip = lrng() < 0.5, r = lrng();
+      const mid = whole[whole.length >> 1];
       const factor = (0.65 + 0.35 * r) * (1 - variety.width) + (0.12 + 1.3 * Math.pow(r, 1.5)) * variety.width;
       const width = spacingAt(mid[0], mid[1]) * sea.width * factor;
-      const { color, cutout } = pickStroke(style.palette, rng, true);
-      const poly = ribbon(line, width, bands ? bandProfile(line, dsep, sea, rng) : profile, dsep / 4);
-      if (poly) ribbons.push({ points: poly, color, kind: "sea", width, cutout });
+      const { color, cutout } = pickStroke(style.palette, lrng, true);
+      for (const piece of atBorder(whole, spotRng(whole.seed, 3))) {
+        lines.push(piece);
+        const line = flip ? reversed(piece) : piece;
+        const poly = ribbon(line, width, thinned(line, bands ? bandProfile(line, dsep, sea, lrng) : profile), dsep / 4);
+        if (poly) ribbons.push({ points: poly, color, kind: "sea", width, cutout });
+      }
     }
     // overlay: a sparser second layer that may cross the sea but not letters or obstacles
     let overlayLines = [];
@@ -1280,13 +1325,17 @@ globalThis.WaveCore = (() => {
       for (const [pts, r] of blockers) opacker.add(pts, r);
       const oSpacing = () => osep;
       oSpacing.base = osep;
-      overlayLines = streamlines(W, H, field, opacker, [], oSpacing, step, bands ? 4 * (W + H) : sea.length * 1.3, orng, inBorder)
-        .filter(() => orng() < variety.overlay);
-      for (const line of overlayLines) {
-        const width = dsep * sea.width * 0.45 * (0.6 + 0.4 * orng());
-        const poly = ribbon(line, width, bands ? bandProfile(line, dsep, sea, orng) : profile, dsep / 4);
-        const { color, cutout } = pickStroke(style.palette, orng, true);
-        if (poly) ribbons.push({ points: poly, color, kind: "overlay", width, cutout });
+      const overlayLength = bands ? 4 * (W + H) : sea.length * 1.3;
+      for (const whole of streamlines(W, H, field, opacker, [], oSpacing, step, overlayLength, orng)) {
+        const lrng = spotRng(whole.seed, 2);
+        if (lrng() >= variety.overlay) continue;
+        const width = dsep * sea.width * 0.45 * (0.6 + 0.4 * lrng());
+        const { color, cutout } = pickStroke(style.palette, lrng, true);
+        for (const line of atBorder(whole, spotRng(whole.seed, 4))) {
+          overlayLines.push(line);
+          const poly = ribbon(line, width, thinned(line, bands ? bandProfile(line, dsep, sea, lrng) : profile), dsep / 4);
+          if (poly) ribbons.push({ points: poly, color, kind: "overlay", width, cutout });
+        }
       }
     }
 
@@ -1348,7 +1397,9 @@ globalThis.WaveCore = (() => {
       else ribbons.push({ points: painted.ring, color, kind: "letter", width: painted.width });
     }
     // wakes: a foam trail that swells out of the tail and fades, with two thin lines spreading to the sides
-    for (const { line, w0, color, figure: owner, stamp } of wakes) {
+    for (const { line: whole, w0, color, figure: owner, stamp } of wakes) {
+      const cut = whole.findIndex(([x, y]) => !inBorder(x, y)), line = cut < 0 ? whole : whole.slice(0, cut); // wakes end at the border
+      if (line.length < 3) continue;
       const trail = ribbon(line, w0, (t) => Math.pow(Math.min(1, t / 0.08), 0.5) * Math.pow(1 - t, 1.6), dsep / 6);
       if (trail) ribbons.push({ points: trail, color, kind: "wake", width: w0, figure: owner, stamp });
       const short = line.slice(0, Math.ceil(line.length * 0.6));

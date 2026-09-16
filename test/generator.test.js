@@ -365,6 +365,33 @@ test("a wavy border keeps the sea inside the enabled sides only", () => {
   assert.ok(Math.max(...tops) - Math.min(...tops) > 3, `border tops ${tops}`);
 });
 
+test("moving the border leaves every sea and overlay stroke away from it exactly as it was", () => {
+  const withBorder = (inset) => {
+    const d = design();
+    d.style.variety = { ...d.style.variety, width: 0.5, overlay: 0.5 };
+    d.style.edges = { ...d.style.edges, enabled: true, inset, amplitude: 5, top: true, right: false, bottom: false, left: true };
+    return core.generate(d);
+  };
+  const near = 30 + 5 + 8 * 4; // outer border line + waviness + a few spacings
+  const interior = (out) => new Set(out.ribbons.filter((r) => (r.kind === "sea" || r.kind === "overlay") && r.points.every(([x, y]) => x > near && y > near))
+    .map((r) => JSON.stringify([r.kind, r.color, r.width, r.points])));
+  const a = interior(withBorder(20)), b = interior(withBorder(30));
+  assert.ok(a.size > 40, `only ${a.size} interior strokes`);
+  assert.deepStrictEqual([...b].filter((r) => !a.has(r)), []);
+  assert.deepStrictEqual([...a].filter((r) => !b.has(r)), []);
+});
+
+test("scattered surfers and their wakes stay inside the border", () => {
+  const d = design();
+  d.style.variety.surfers = 1;
+  d.style.edges = { ...d.style.edges, enabled: true, inset: 45, amplitude: 3, top: true, right: true, bottom: true, left: true };
+  const out = core.generate(d);
+  const inside = ([x, y]) => x > 41 && y > 41 && x < 200 - 41 && y < 250 - 41;
+  assert.ok(out.figures.length > 0, "no surfers placed");
+  assert.ok(out.figures.every((f) => inside([f.x, f.y])), "surfer outside the border");
+  assert.ok(out.ribbons.filter((r) => r.kind === "wake").every((r) => r.points.every(([x, y]) => inside([x, y]) || Math.min(x - 41, y - 41, 159 - x, 209 - y) > -3)), "wake outside the border");
+});
+
 // Direction samples of streamline segments: [x, y, dx, dy]
 const segments = (lines, every = 6) => lines.flatMap((l) => l.filter((_, i) => i % every === 0 && i + 1 < l.length)
   .map((p, n) => { const q = l[n * every + 1]; const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1; return [p[0], p[1], (q[0] - p[0]) / len, (q[1] - p[1]) / len]; }));
@@ -485,9 +512,8 @@ test("bands swell and pinch along their length when swell is on", () => {
   d.style.sea.strokeType = "bands";
   const ratio = (swell) => {
     d.style.sea.swell = swell;
-    const longest = core.generate(d).ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length)[0];
-    const w = middleWidths(longest.points);
-    return Math.max(...w) / Math.min(...w);
+    const longest = core.generate(d).ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length).slice(0, 5);
+    return Math.max(...longest.map((band) => { const w = middleWidths(band.points); return Math.max(...w) / Math.min(...w); }));
   };
   assert.ok(ratio(0) < 1.3, `steady band varies ${ratio(0)}`);
   assert.ok(ratio(1) > 2, `swelling band only varies ${ratio(1)}`);
