@@ -63,7 +63,7 @@ test("a version 1 design file opens as drawing + style", () => {
   assert.deepStrictEqual(d.drawing.elements[1].parts, [[[[0, 0], [1, 0], [1, 1]]]], "old single-ring SVGs become one part");
   assert.strictEqual(d.style.sea.seed, 7);
   assert.strictEqual(d.style.palette.letter, "#ff0000");
-  assert.deepStrictEqual(d.style.letters, { emphasis: 0.2, bend: 0.7 });
+  assert.deepStrictEqual(d.style.letters, { emphasis: 0.2, bend: 0.7, smooth: 0 });
   assert.ok(d.style.variety && d.style.edges, "new style groups get defaults");
 });
 

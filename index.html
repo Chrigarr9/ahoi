@@ -273,7 +273,7 @@ globalThis.WaveCore = (() => {
         letter: "#eee8d6",
         transparent: null, // null | "background" | index into strokes
       },
-      letters: { emphasis: 0.3, bend: 0.4 },
+      letters: { emphasis: 0.3, bend: 0.4, smooth: 0 },
       edges: { enabled: false, inset: 25, amplitude: 12, top: true, right: true, bottom: true, left: true },
     };
   }
@@ -372,7 +372,7 @@ globalThis.WaveCore = (() => {
       Object.assign(next.edges, { enabled: rng() < 0.4, inset: Math.round(8 + 20 * rng()), amplitude: Math.round(2 + 12 * rng()) });
     }
     if (groups.letters) {
-      next.letters = { emphasis: round(0.1 + 0.5 * rng()), bend: round(0.2 + 0.6 * rng()) };
+      Object.assign(next.letters, { emphasis: round(0.1 + 0.5 * rng()), bend: round(0.2 + 0.6 * rng()) }); // smoothing is kept
       next.sea.spacingMm = Math.round((6 + 8 * rng()) * 2) / 2;
     }
     return next;
@@ -676,6 +676,22 @@ globalThis.WaveCore = (() => {
     }
     return out;
   }
+  // Gaussian smoothing along the line; the window shrinks symmetrically near the ends so they stay put.
+  function smoothLine(pts, sigmaMm, step) {
+    const sigma = sigmaMm / step;
+    if (sigma < 0.5 || pts.length < 3) return pts;
+    const reach = Math.ceil(3 * sigma);
+    return pts.map((_, i) => {
+      const r = Math.min(reach, i, pts.length - 1 - i);
+      let x = 0, y = 0, total = 0;
+      for (let j = -r; j <= r; j++) {
+        const w = Math.exp(-(j * j) / (2 * sigma * sigma));
+        x += w * pts[i + j][0]; y += w * pts[i + j][1]; total += w;
+      }
+      return [x / total, y / total];
+    });
+  }
+
   function ribbon(line, width, profile, step) {
     const sub = line.filter((_, i) => i % 3 === 0 || i === line.length - 1);
     const pts = resample(sub.length > 3 ? chaikin(sub, 1) : sub, step);
@@ -865,7 +881,8 @@ globalThis.WaveCore = (() => {
     const letterLines = [];
     for (const el of drawing.elements) {
       if (el.type !== "stroke" || el.points.length < 2) continue;
-      const pts = resample(el.points.map((p) => applyTransform(el.transform, p)), step);
+      const raw = resample(el.points.map((p) => applyTransform(el.transform, p)), step);
+      const pts = smoothLine(raw, (style.letters.smooth || 0) * 8, step);
       block(pts, dsep / 2);
       offsetSeeds(pts, dsep, seeds);
       letterLines.push(pts);
@@ -1018,7 +1035,7 @@ globalThis.WaveCore = (() => {
       if (poly) ribbons.push({ points: poly, color, kind: "letter", width });
     }
     const background = style.palette.transparent === "background" ? null : style.palette.background;
-    return { width: W, height: H, background, streamlines: lines, overlayStreamlines: overlayLines, ribbons, fills };
+    return { width: W, height: H, background, streamlines: lines, overlayStreamlines: overlayLines, letterStrokes: letterLines, ribbons, fills };
   }
 
   // ---------- SVG export: print file and editable source in one
@@ -1561,6 +1578,7 @@ globalThis.WaveCore = (() => {
   const letters = $("letter-controls");
   slider(letters, { label: "Letter emphasis (hidden → visible)", min: 0, max: 1, step: 0.01, fmt: pct,
     get: (s) => s.letters.emphasis, set: (s, v) => (s.letters.emphasis = v) });
+  slider(letters, { label: "Smooth letters", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.letters.smooth, set: (s, v) => (s.letters.smooth = v) });
   slider(letters, { label: "Flow bend along letters", min: 0, max: 1, step: 0.01, fmt: pct, get: (s) => s.letters.bend, set: (s, v) => (s.letters.bend = v) });
   slider(letters, { label: "Spacing", min: 3, max: 30, step: 0.5, fmt: mm, get: (s) => s.sea.spacingMm, set: (s, v) => (s.sea.spacingMm = v) });
   const edges = $("edge-controls");

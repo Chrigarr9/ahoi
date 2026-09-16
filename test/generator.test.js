@@ -330,3 +330,19 @@ test("a transparent background leaves the background empty", () => {
   d.style.palette.transparent = "background";
   assert.strictEqual(core.generate(d, "preview").background, null);
 });
+
+test("smoothing straightens a jagged letter stroke without moving its ends", () => {
+  const d = design();
+  const zigzag = Array.from({ length: 31 }, (_, i) => [50 + i * 3, 120 + (i % 2 ? 3 : -3)]);
+  d.drawing.elements = [{ id: "z", type: "stroke", transform: { ...identity }, points: zigzag }];
+  const wobble = (line) => Math.max(...line.slice(8, -8).map(([, y]) => Math.abs(y - 120)));
+
+  const rough = core.generate(d, "full").letterStrokes[0];
+  assert.ok(wobble(rough) > 2, `unsmoothed wobble ${wobble(rough)}`);
+
+  d.style.letters.smooth = 1;
+  const smooth = core.generate(d, "full").letterStrokes[0];
+  assert.ok(wobble(smooth) < 0.8, `smoothed wobble ${wobble(smooth)}`);
+  const [first, last] = [smooth[0], smooth[smooth.length - 1]];
+  assert.ok(Math.hypot(first[0] - 50, first[1] - 117) < 0.5 && Math.hypot(last[0] - 140, last[1] - 117) < 0.5, `ends ${first} ${last}`);
+});
