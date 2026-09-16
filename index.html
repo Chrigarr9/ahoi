@@ -62,6 +62,9 @@
       <h2>File</h2>
       <div class="row">
         <button id="open-btn">Open SVG…</button>
+        <button id="reset" title="Start over with the default design (Undo brings it back)">Reset</button>
+      </div>
+      <div class="row">
         <button id="export-svg" class="primary">Export SVG</button>
       </div>
       <div class="row">
@@ -1179,6 +1182,12 @@ globalThis.WaveCore = (() => {
   $("redo").addEventListener("click", redo);
   $("delete").addEventListener("click", deleteSelected);
   $("render-full").addEventListener("click", () => regenerate("full"));
+  $("reset").addEventListener("click", () => {
+    snapshot();
+    coalesce = null;
+    design = core.defaultDesign();
+    changed({ immediate: true });
+  });
   document.addEventListener("keydown", (e) => {
     if (e.target.closest("input, select, textarea")) return;
     const mod = e.ctrlKey || e.metaKey;

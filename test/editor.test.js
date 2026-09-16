@@ -130,3 +130,19 @@ test("a selection colour picker keeps working across repeated changes", async ()
 
   assert.strictEqual((await exportedDesign(page)).elements[0].sailColor, "#00ff00");
 });
+
+test("reset starts a fresh default design, and undo brings the old one back", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Dot", exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.4, 0.4)));
+  await page.getByLabel("Seed").fill("42");
+  await page.getByLabel("Seed").press("Enter");
+
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  assert.deepStrictEqual(await exportedDesign(page), core.defaultDesign());
+
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  const restored = await exportedDesign(page);
+  assert.strictEqual(restored.sea.seed, 42);
+  assert.strictEqual(restored.elements.length, 1);
+});
