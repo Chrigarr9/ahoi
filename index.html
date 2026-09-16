@@ -190,6 +190,7 @@
         <div id="stroke-colors"></div>
         <button id="add-color">Add colour</button>
         <label class="field"><span>Transparent colour</span><select id="transparent"></select></label>
+        <label class="check"><input type="checkbox" id="figure-palette">Surfers &amp; boats in palette colours</label>
       </details>
       <details>
         <summary>Letters &amp; density</summary>
@@ -333,6 +334,7 @@ globalThis.WaveCore = (() => {
       sea: { ...FLOW_DEFAULTS, seed: 1, spacingMm: 9 },
       variety: { width: 0, spacing: 0, overlay: 0, accents: 0, surfers: 0, surferSize: 4, boats: 0, boatSize: 6 },
       palette: {
+        figureColours: "own",
         background: "#587ca0",
         strokes: [
           { color: "#eee8d6", weight: 0.55 },
@@ -435,6 +437,7 @@ globalThis.WaveCore = (() => {
       const keep = style.palette.transparent;
       next.palette = rng() < 0.4 ? paletteFromPreset(names[Math.floor(rng() * names.length)]) : randomPalette(rng);
       next.palette.transparent = keep === "background" || (typeof keep === "number" && keep < next.palette.strokes.length) ? keep : null;
+      next.palette.figureColours = style.palette.figureColours;
     }
     if (groups.variety) {
       Object.assign(next.variety, {
@@ -1434,8 +1437,8 @@ globalThis.WaveCore = (() => {
       c.fill(p, "evenodd");
     }
     for (const f of g.figures || []) {
-      const img = figureImage(f.figure);
-      if (!img.complete || !img.naturalWidth) continue; // repainted once the picture has loaded
+      const img = figureSource(f.figure);
+      if (!img) continue; // repainted once the picture has loaded
       c.save();
       c.translate(f.x, f.y);
       c.rotate(f.angle);
@@ -1487,6 +1490,36 @@ globalThis.WaveCore = (() => {
       figureImages.set(id, img);
     }
     return img;
+  }
+  // The picture as drawn: its own colours, or recoloured by brightness into the palette's shades (cached per palette)
+  const recoloured = new Map();
+  function figureSource(id) {
+    const img = figureImage(id);
+    if (!img.complete || !img.naturalWidth) return null;
+    const p = design.style.palette;
+    if (p.figureColours !== "palette") return img;
+    const ramp = [p.transparent === "background" ? null : p.background, ...p.strokes.filter((_, i) => i !== p.transparent).map((s) => s.color), p.letter]
+      .filter(Boolean).map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)))
+      .sort((a, b) => (0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2]) - (0.2126 * b[0] + 0.7152 * b[1] + 0.0722 * b[2]));
+    const key = id + JSON.stringify(ramp);
+    if (recoloured.has(key)) return recoloured.get(key);
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0);
+    const data = x.getImageData(0, 0, c.width, c.height), px = data.data;
+    const lums = [];
+    for (let i = 0; i < px.length; i += 4) if (px[i + 3] > 128) lums.push(0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]);
+    lums.sort((a, b) => a - b);
+    const lo = lums[Math.floor(lums.length * 0.03)] || 0, hi = lums[Math.floor(lums.length * 0.97)] || 255;
+    for (let i = 0; i < px.length; i += 4) { // stretch the picture's own brightness range over the ramp
+      const t = Math.max(0, Math.min(1, (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2] - lo) / (hi - lo || 1))) * (ramp.length - 1);
+      const k = Math.min(ramp.length - 2, Math.floor(t)), u = t - k, a = ramp[k], b = ramp[Math.min(ramp.length - 1, k + 1)];
+      for (let ch = 0; ch < 3; ch++) px[i + ch] = a[ch] + (b[ch] - a[ch]) * u;
+    }
+    x.putImageData(data, 0, 0);
+    recoloured.set(key, c);
+    return c;
   }
   function paintSea() {
     const c = seaCanvas.getContext("2d");
@@ -1887,7 +1920,7 @@ globalThis.WaveCore = (() => {
     e.target.value = "";
     if (name) mutate((d) => {
       const keep = d.style.palette.transparent;
-      d.style.palette = core.paletteFromPreset(name, keep === "background" ? keep : null);
+      d.style.palette = { ...core.paletteFromPreset(name, keep === "background" ? keep : null), figureColours: d.style.palette.figureColours };
     });
   });
   function numberField(input, get, set, min, max) {
@@ -1948,6 +1981,8 @@ globalThis.WaveCore = (() => {
     sel.value = p.transparent === null || p.transparent === undefined ? "none" : String(p.transparent);
   }
   $("add-color").addEventListener("click", () => mutate((d) => d.style.palette.strokes.push({ color: "#ffffff", weight: 0.2 })));
+  $("figure-palette").addEventListener("change", (e) => mutate((d) => (d.style.palette.figureColours = e.target.checked ? "palette" : "own")));
+  refreshers.push(() => ($("figure-palette").checked = design.style.palette.figureColours === "palette"));
   $("transparent").addEventListener("change", (e) => {
     const v = e.target.value;
     mutate((d) => (d.style.palette.transparent = v === "none" ? null : v === "background" ? "background" : Number(v)));
@@ -2138,7 +2173,9 @@ globalThis.WaveCore = (() => {
   }
   $("export-svg").addEventListener("click", () => {
     const g = regenerate("full");
-    download(new Blob([core.exportSVG(design, g)], { type: "image/svg+xml" }), "wave-design.svg");
+    const hrefFor = (id) => design.style.palette.figureColours === "palette" && figureSource(id) instanceof HTMLCanvasElement
+      ? figureSource(id).toDataURL("image/png") : core.figure(id).href;
+    download(new Blob([core.exportSVG(design, g, hrefFor)], { type: "image/svg+xml" }), "wave-design.svg");
   });
   $("export-png").addEventListener("click", () => {
     const dpi = parseFloat($("dpi").value);

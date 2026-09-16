@@ -446,3 +446,29 @@ test("the stamp tool places a picture that follows the flow, and it can become a
   assert.strictEqual(typeof first.transform.r, "number", "switching to obstacle keeps the angle it had");
   assert.deepStrictEqual(page.errors, []);
 });
+
+test("figures can be recoloured into the palette so they blend into the sea", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  await page.getByRole("button", { name: "Surfer 1", exact: true }).click();
+  const before = await page.locator("#status").innerText();
+  await page.mouse.click(...(await at(page, 0.5, 0.5)));
+  await page.waitForFunction((t) => document.getElementById("status").textContent !== t, before);
+  await page.getByRole("button", { name: "Letter", exact: true }).click(); // no orange selection frame in the way
+  // the default palette is blue and cream; the painted surfer (skin, orange board) is clearly warm
+  const warm = () => page.evaluate(() => {
+    const c = document.getElementById("stage"), r = Math.round(c.width * 0.08);
+    const d = c.getContext("2d").getImageData(Math.floor(c.width / 2) - r, Math.floor(c.height / 2) - r, 2 * r, 2 * r).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] - d[i + 2] > 40) n++;
+    return n;
+  });
+  assert.ok((await warm()) > 50, "own colours: surfer not visible");
+
+  await page.locator("summary", { hasText: "Colours" }).click();
+  await page.getByLabel("Surfers & boats in palette colours").check();
+  await page.waitForTimeout(600);
+  assert.strictEqual(await warm(), 0, "palette colours: warm pixels left");
+  assert.strictEqual((await exportedDesign(page)).style.palette.figureColours, "palette");
+  assert.deepStrictEqual(page.errors, []);
+});
