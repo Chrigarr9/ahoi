@@ -145,3 +145,25 @@ test("brush, size, mode, colour, nib and pen pressure of painted strokes survive
   const plain = (o) => JSON.parse(JSON.stringify(o));
   assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg)).drawing.elements, plain(d.drawing.elements));
 });
+
+test("a design saved before edge fade opens with the fade off, and fade settings survive export and reopen", () => {
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  const old = sampleDesign();
+  old.style.edges = { enabled: true, inset: 25, amplitude: 12, top: true, right: true, bottom: true, left: true };
+  const reopened = core.loadDesignFromSVG(core.exportSVG(old, core.generate(old))).style.edges;
+  assert.deepStrictEqual(plain(reopened), { ...plain(old.style.edges), fadeWidth: 30, fadeShorter: 0, fadeThinner: 0, fadeSparser: 0 });
+
+  const d = sampleDesign();
+  Object.assign(d.style.edges, { enabled: true, fadeWidth: 45, fadeShorter: 0.4, fadeThinner: 0.7, fadeSparser: 0.25 });
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(core.exportSVG(d, core.generate(d))).style.edges), plain(d.style.edges));
+});
+
+test("typed text with its font, layout and brush survives export and reopen", () => {
+  const d = sampleDesign();
+  d.drawing.elements.push({ id: "tx", type: "text", transform: { x: 100, y: 120, s: 1.2, r: 0.1 }, text: "Ahoi\nCrew <&>", font: "Allure", heightCm: 3.5,
+    lineSpacing: 1.8, letterSpacing: 0.1, slant: -8, align: "right", brush: "calligraphy", size: 6, mode: "visible", color: { palette: 2 }, nib: 30 });
+  const svg = core.exportSVG(d, core.generate(d));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg)).drawing.elements, plain(d.drawing.elements));
+  assert.ok((svg.match(/<path /g) || []).length > 20, "the letters are painted into the print");
+});

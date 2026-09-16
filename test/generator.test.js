@@ -365,6 +365,76 @@ test("a wavy border keeps the sea inside the enabled sides only", () => {
   assert.ok(Math.max(...tops) - Math.min(...tops) > 3, `border tops ${tops}`);
 });
 
+test("moving the border leaves every sea stroke, overlay stroke and accent away from it exactly as it was", () => {
+  const withBorder = (inset) => {
+    const d = design();
+    d.style.variety = { ...d.style.variety, width: 0.5, overlay: 0.5, accents: 0.5 };
+    d.style.edges = { ...d.style.edges, enabled: true, inset, amplitude: 5, top: true, right: false, bottom: false, left: true };
+    return core.generate(d);
+  };
+  const near = 30 + 5 + 8 * 4; // outer border line + waviness + a few spacings
+  const away = (pts) => pts.every(([x, y]) => x > near && y > near);
+  const interior = (out) => new Set([
+    ...out.ribbons.filter((r) => ["sea", "overlay", "accent"].includes(r.kind) && away(r.points)).map((r) => JSON.stringify([r.kind, r.color, r.width, r.points])),
+    ...out.fills.filter((f) => f.kind === "accent" && away(f.rings[0])).map((f) => JSON.stringify([f.color, f.rings])),
+  ]);
+  const a = interior(withBorder(20)), b = interior(withBorder(30));
+  assert.ok(a.size > 40, `only ${a.size} interior strokes`);
+  assert.deepStrictEqual([...b].filter((r) => !a.has(r)), []);
+  assert.deepStrictEqual([...a].filter((r) => !b.has(r)), []);
+});
+
+test("scattered surfers and their wakes stay inside the border", () => {
+  const d = design();
+  d.style.variety.surfers = 1;
+  d.style.edges = { ...d.style.edges, enabled: true, inset: 45, amplitude: 3, top: true, right: true, bottom: true, left: true };
+  const out = core.generate(d);
+  const inside = ([x, y]) => x > 41 && y > 41 && x < 200 - 41 && y < 250 - 41;
+  assert.ok(out.figures.length > 0, "no surfers placed");
+  assert.ok(out.figures.every((f) => inside([f.x, f.y])), "surfer outside the border");
+  assert.ok(out.ribbons.filter((r) => r.kind === "wake").every((r) => r.points.every(([x, y]) => inside([x, y]) || Math.min(x - 41, y - 41, 159 - x, 209 - y) > -3)), "wake outside the border");
+});
+
+test("after a stroke-length change most of the canvas keeps its sea colour", () => {
+  const colours = (length) => {
+    const d = design();
+    d.style.sea.length = length;
+    d.style.palette.transparent = null;
+    d.style.palette.strokes = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"].map((color) => ({ color, weight: 1 }));
+    const at = new Map(); // colour per 4 mm cell
+    for (const r of core.generate(d).ribbons.filter((r) => r.kind === "sea")) for (const [x, y] of r.points) at.set(`${Math.floor(x / 4)},${Math.floor(y / 4)}`, r.color);
+    return at;
+  };
+  const before = colours(90), after = colours(95);
+  const shared = [...after.keys()].filter((k) => before.has(k));
+  const same = shared.filter((k) => before.get(k) === after.get(k)).length / shared.length;
+  assert.ok(same > 0.4, `only ${Math.round(same * 100)}% kept its colour (a random reshuffle keeps 25%)`);
+});
+
+test("edge fade makes sea strokes near the border shorter, thinner and fewer, each on its own slider", () => {
+  // straight border 20 mm in on the left and top; the fade reaches 40 mm further in
+  const zone = ([x, y]) => x < 40 || y < 40; // the outer half of the fade
+  const measure = (knobs) => {
+    const d = design();
+    d.style.sea.turbulence = 0.6;
+    d.style.edges = { ...d.style.edges, enabled: true, inset: 20, amplitude: 0, top: true, left: true, right: false, bottom: false, fadeWidth: 40, ...knobs };
+    const out = core.generate(d);
+    const pieces = out.streamlines.filter((l) => zone(l[l.length >> 1]));
+    const length = pieces.reduce((s, l) => s + lineLength(l), 0);
+    const outer = out.ribbons.filter((r) => r.kind === "sea" && r.points.every(zone)).map((r) => r.points);
+    const loop = (pts, f) => pts.reduce((a, p, i) => a + f(p, pts[(i + 1) % pts.length]), 0);
+    const area = outer.reduce((a, pts) => a + Math.abs(loop(pts, (p, q) => (p[0] * q[1] - q[0] * p[1]) / 2)), 0);
+    const perimeter = outer.reduce((a, pts) => a + loop(pts, (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1])), 0);
+    return { meanLength: length / pieces.length, length, thickness: (2 * area) / perimeter }; // mean width of the outer strokes
+  };
+  const plain = measure({});
+  const shorter = measure({ fadeShorter: 1 }), thinner = measure({ fadeThinner: 1 }), sparser = measure({ fadeSparser: 1 });
+  assert.ok(shorter.meanLength < 0.6 * plain.meanLength, `shorter: ${shorter.meanLength} vs ${plain.meanLength} mm`);
+  assert.ok(thinner.thickness < 0.75 * plain.thickness, `thinner: ${thinner.thickness} vs ${plain.thickness} mm`);
+  assert.ok(sparser.length < 0.7 * plain.length, `sparser: ${sparser.length} vs ${plain.length} mm of strokes`);
+  assert.ok(Math.abs(thinner.length - plain.length) < 1e-6, "thinner alone keeps every stroke");
+});
+
 // Direction samples of streamline segments: [x, y, dx, dy]
 const segments = (lines, every = 6) => lines.flatMap((l) => l.filter((_, i) => i % every === 0 && i + 1 < l.length)
   .map((p, n) => { const q = l[n * every + 1]; const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1; return [p[0], p[1], (q[0] - p[0]) / len, (q[1] - p[1]) / len]; }));
@@ -485,9 +555,8 @@ test("bands swell and pinch along their length when swell is on", () => {
   d.style.sea.strokeType = "bands";
   const ratio = (swell) => {
     d.style.sea.swell = swell;
-    const longest = core.generate(d).ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length)[0];
-    const w = middleWidths(longest.points);
-    return Math.max(...w) / Math.min(...w);
+    const longest = core.generate(d).ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length).slice(0, 5);
+    return Math.max(...longest.map((band) => { const w = middleWidths(band.points); return Math.max(...w) / Math.min(...w); }));
   };
   assert.ok(ratio(0) < 1.3, `steady band varies ${ratio(0)}`);
   assert.ok(ratio(1) > 2, `swelling band only varies ${ratio(1)}`);
@@ -641,4 +710,48 @@ test("erasing through a pressure stroke keeps the pressure and brush on both pie
       assert.ok(Math.abs(piece.pressure[i] - (x - 40) / 120) < 0.01, `pressure ${piece.pressure[i]} at x ${x}`);
     });
   }
+});
+
+const textElement = (props = {}) => ({ id: "tx", type: "text", transform: { x: 100, y: 125, s: 1, r: 0 }, text: "HIH", font: "Readability",
+  heightCm: 4, lineSpacing: 1.2, letterSpacing: 0, slant: 0, align: "center", brush: "round", size: 3, mode: "visible", color: "#aa0000", ...props });
+const bounds = (lines) => {
+  const pts = lines.flat();
+  return { x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), y1: Math.max(...pts.map((p) => p[1])) };
+};
+
+test("typed text paints its letters as brush strokes, capitals as tall as the letter height, centred on the element, with the waves kept clear", () => {
+  const d = design();
+  d.drawing.elements = [textElement()];
+  const out = core.generate(d);
+
+  const paint = out.ribbons.filter((r) => r.kind === "paint");
+  assert.ok(paint.length >= 3 && paint.every((r) => r.color === "#aa0000"), `${paint.length} painted letter strokes`);
+  const b = bounds(out.letterStrokes);
+  assert.ok(Math.abs(b.y1 - b.y0 - 40) < 1, `capital H is ${b.y1 - b.y0} mm tall`);
+  assert.ok(Math.abs((b.x0 + b.x1) / 2 - 100) < 1 && Math.abs((b.y0 + b.y1) / 2 - 125) < 1, "text centred on its position");
+  const waves = out.streamlines.flat();
+  const nearest = Math.min(...paint.map((r) => Math.min(...waves.map((p) => distanceToLine(r.points, p)))));
+  assert.ok(nearest >= d.style.sea.spacingMm / 2, `a wave comes within ${nearest} mm of a painted letter`);
+});
+
+test("font, letter spacing, line spacing, alignment and slant each reshape typed text", () => {
+  const lines = (props) => core.textLines(textElement(props));
+  const size = (props) => { const b = bounds(lines(props)); return { w: b.x1 - b.x0, h: b.y1 - b.y0 }; };
+  const plain = size({});
+
+  assert.notDeepStrictEqual(lines({ font: "Allure" }), lines({}), "another font draws other letters");
+  assert.ok(Math.abs(size({ letterSpacing: 0.5 }).w - plain.w - 2 * 0.5 * 40) < 0.5, "letter spacing adds half a letter height between each of three letters");
+  // two lines of H: 40 mm letters, baselines 2 letter heights apart -> 80 + 40 mm tall
+  assert.ok(Math.abs(size({ text: "H\nH", lineSpacing: 2 }).h - 120) < 0.5, `two lines ${size({ text: "H\nH", lineSpacing: 2 }).h} mm tall`);
+
+  // a short line under a long one: its letters sit at the left edge, the middle or the right edge of the long line
+  const shortLine = (align) => { const all = lines({ text: "HIHIH\nI", align }); const b = bounds(all);
+    const low = bounds(all.filter((pts) => pts.every(([, y]) => y > (b.y0 + b.y1) / 2))); return [low.x0 - b.x0, b.x1 - low.x1]; };
+  const [leftGap] = shortLine("left"), [cLeft, cRight] = shortLine("center"), [, rightGap] = shortLine("right");
+  assert.ok(leftGap < 8 && rightGap < 8 && Math.abs(cLeft - cRight) < 1, `left ${leftGap}, centre ${cLeft}/${cRight}, right ${rightGap}`);
+
+  // slanted, the top of the upright I leans to the right of its foot
+  const stem = lines({ text: "I", slant: 20 }).sort((a, b) => b.length - a.length)[0];
+  const [top, foot] = [stem.reduce((a, p) => (p[1] < a[1] ? p : a)), stem.reduce((a, p) => (p[1] > a[1] ? p : a))];
+  assert.ok(Math.abs((top[0] - foot[0]) / (foot[1] - top[1]) - Math.tan((20 * Math.PI) / 180)) < 0.05, "leans by the slant angle");
 });

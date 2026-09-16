@@ -10,6 +10,8 @@ module.exports = function loadCore() {
   const ctx = vm.createContext({});
   const sprites = /<script id="figure-library">([\s\S]*?)<\/script>/.exec(html);
   if (sprites) vm.runInContext(sprites[1], ctx);
+  const fonts = /<script id="stroke-fonts">([\s\S]*?)<\/script>/.exec(html);
+  if (fonts) vm.runInContext(fonts[1], ctx);
   vm.runInContext(m[1], ctx);
   return ctx.WaveCore;
 };
