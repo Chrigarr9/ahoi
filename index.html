@@ -16,7 +16,7 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body { background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
-  .app { display: grid; grid-template-columns: 380px 1fr; height: 100vh; }
+  .app { display: grid; grid-template-columns: 380px 1fr; height: 100vh; height: 100dvh; } /* dvh: tablet browser bars never cover the bottom */
   .panel { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 14px 16px 60px; }
   h1 { font-size: 18px; margin: 0; }
   .tagline { color: var(--muted); margin: 2px 0 6px; }
@@ -71,9 +71,12 @@
   .figure-grid img { max-width: 100%; max-height: 38px; }
   .library-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 4px; align-items: center; margin: 4px 0; }
   .empty { color: var(--muted); font-style: italic; margin: 4px 0; }
-  main { display: grid; grid-template-rows: auto auto 1fr; min-width: 0; }
+  main { display: grid; grid-template-rows: auto auto 1fr; grid-template-columns: minmax(0, 1fr); min-width: 0; }
   .topbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px;
     background: var(--panel); border-bottom: 1px solid var(--line); }
+  .topbar-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .topbar button { white-space: nowrap; flex: none; }
+  .topbar .segmented { flex: none; }
   #status { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
   .hint { padding: 5px 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
   .workspace { position: relative; background: var(--work); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
@@ -84,6 +87,26 @@
     background: var(--ink); color: var(--panel); opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.show { opacity: 1; }
   #toast.error { background: var(--danger); color: #fff; }
+
+  /* Touch screens (tablets too): finger-sized buttons */
+  @media (pointer: coarse) {
+    button { min-height: 40px; }
+  }
+  /* Tablets in portrait and small laptops: a narrower panel leaves the canvas room */
+  @media (min-width: 761px) and (max-width: 1100px) {
+    .app { grid-template-columns: 320px 1fr; }
+    .panel { padding: 10px 12px 60px; }
+  }
+  /* Phones in landscape: little height, so the chrome shrinks to one line each */
+  @media (min-width: 761px) and (max-height: 500px) {
+    .app { grid-template-columns: 300px 1fr; }
+    h1, .tagline { display: none; }
+    .topbar { flex-wrap: nowrap; gap: 4px; padding: 3px 6px; }
+    .topbar-tools { flex: 0 1 auto; flex-wrap: nowrap; overflow-x: auto; min-width: 0; gap: 4px; }
+    .topbar button { padding: 4px 9px; }
+    #status { font-size: 11px; white-space: nowrap; }
+    .hint { font-size: 12px; padding: 3px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  }
 
   /* Phones: canvas on top, the painting and style controls scroll underneath */
   @media (max-width: 760px) {
@@ -99,6 +122,7 @@
     .tools .wide { grid-column: span 2; }
     .tools button { padding: 6px 2px; font-size: 12px; }
     .topbar { gap: 4px; padding: 4px 6px; }
+    .topbar-tools { flex: 1 1 100%; min-width: 0; flex-wrap: nowrap; overflow-x: auto; gap: 4px; } /* one row of buttons that scrolls sideways */
     .topbar button { padding: 4px 9px; }
     #status { font-size: 11px; flex-basis: 100%; margin: 0; text-align: right; }
     .hint { font-size: 12px; padding: 3px 8px; }
@@ -248,6 +272,7 @@
 
   <main>
     <div class="topbar">
+      <div class="topbar-tools">
       <div class="segmented" role="group" aria-label="View">
         <button id="view-sea" aria-pressed="true">Sea</button>
         <button id="view-letters" aria-pressed="false">Letter view</button>
@@ -259,6 +284,7 @@
         <button id="zoom-in" title="Zoom in">+</button>
       </div>
       <button id="render-full" title="Render at full detail">Render full</button>
+      </div>
       <span id="status" role="status"></span>
     </div>
     <div class="hint" id="hint"></div>
@@ -2032,7 +2058,8 @@ globalThis.WaveCore = (() => {
     if (e.pointerType === "touch") {
       if (penDown) { palms.add(e.pointerId); return; } // palm resting while the pen draws
       touches.set(e.pointerId, [e.clientX, e.clientY]);
-      if (ui.fingerDraws && touches.size === 1) { toolPointer = e.pointerId; toolDown(e); return; }
+      // in the jersey view there is nothing to draw, so one finger drags the print (two still pan and zoom)
+      if ((ui.fingerDraws || viewMode === "jersey") && touches.size === 1) { toolPointer = e.pointerId; toolDown(e); return; }
       if (toolPointer !== null) { toolCancel(); toolPointer = null; }
       return;
     }

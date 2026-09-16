@@ -661,3 +661,26 @@ test("a bigger jersey size makes the same print look smaller on the shirt", asyn
   assert.ok(small > 0.2 && big < small * 0.9, `print share on S ${small}, on XXL ${big}`);
   assert.deepStrictEqual(page.errors, []);
 });
+
+for (const [device, width, height] of [["an iPad in portrait", 820, 1180], ["an iPad in landscape", 1180, 820], ["a phone in landscape", 844, 390]]) {
+  test(`on ${device} nothing scrolls sideways, the canvas and view buttons are on screen, and a finger drags the print on the jersey`, async () => {
+    const page = await browser.newPage({ viewport: { width, height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    const errors = [];
+    page.on("pageerror", (e) => errors.push(e));
+    await page.goto(TOOL_URL);
+    await page.getByRole("status").filter({ hasText: /ms/ }).waitFor();
+
+    assert.strictEqual(await page.evaluate(() => document.documentElement.scrollWidth), width, "no sideways scrolling");
+    const stage = await page.locator("#stage").boundingBox();
+    assert.ok(stage.x >= 0 && stage.x + stage.width <= width && stage.y + stage.height <= height && stage.height > height * 0.5, `canvas on screen: ${JSON.stringify(stage)}`);
+    const jerseyButton = await page.getByRole("button", { name: "Jersey", exact: true }).boundingBox();
+    assert.ok(jerseyButton.x + jerseyButton.width <= width && jerseyButton.height >= 40, `Jersey button reachable and finger-sized: ${JSON.stringify(jerseyButton)}`);
+
+    await page.getByRole("button", { name: "Jersey", exact: true }).tap();
+    await shirtPainted(page);
+    const box = await page.locator("#stage").boundingBox();
+    await touch(page, Array.from({ length: 8 }, (_, i) => [[box.x + box.width / 2 + i * 4, box.y + box.height * 0.4]]));
+    assert.ok((await exportedDesign(page)).drawing.jersey.printX > 1, "one finger moved the print");
+    assert.deepStrictEqual(errors, []);
+  });
+}
