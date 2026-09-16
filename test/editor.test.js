@@ -119,3 +119,14 @@ test("clicking an element selects it so it can be deleted", async () => {
 
   assert.strictEqual((await exportedDesign(page)).elements.length, 0);
 });
+
+test("a selection colour picker keeps working across repeated changes", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Boat", exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.5, 0.5)));
+  const sail = await page.getByLabel("Sail").elementHandle(); // the same input a user keeps dragging in
+  await sail.fill("#ff0000");
+  await sail.fill("#00ff00");
+
+  assert.strictEqual((await exportedDesign(page)).elements[0].sailColor, "#00ff00");
+});

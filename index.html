@@ -453,8 +453,9 @@ globalThis.WaveCore = (() => {
         return [{ rings: [BOAT.sail], color: el.sailColor || BOAT.sailColor, kind: "boat" },
                 { rings: [BOAT.hull], color: el.hullColor || BOAT.hullColor, kind: "boat" }];
       case "shape":
-      case "svg":
-        return [{ rings: el.rings, color: el.color, kind: el.type }];
+        return [{ rings: el.rings, color: el.color, kind: "shape" }];
+      case "svg": // one fill per source shape, so overlapping shapes stack instead of cancelling out
+        return el.parts.map((rings) => ({ rings, color: el.color, kind: "svg" }));
       default:
         return [];
     }
@@ -477,6 +478,7 @@ globalThis.WaveCore = (() => {
       case "stroke": return [el.points];
       case "dot": return [circleRing(el.radius)];
       case "boat": return [BOAT.sail, BOAT.hull];
+      case "svg": return el.parts.flat();
       default: return el.rings;
     }
   }
@@ -992,24 +994,34 @@ globalThis.WaveCore = (() => {
   }
   $("add-color").addEventListener("click", () => mutate((d) => d.palette.strokes.push({ color: "#ffffff", weight: 0.2 })));
 
+  // Rebuilt only when the selection changes; otherwise inputs are updated in place so an open picker survives edits.
+  let selectionRefreshers = [];
   function refreshSelectionPanel() {
     const el = selected(), panel = $("selection-panel"), box = $("selection-controls");
     panel.hidden = !el;
+    const owner = el ? el.id : "";
+    if (box.dataset.owner === owner) {
+      for (const refresh of selectionRefreshers) refresh(el);
+      return;
+    }
+    box.dataset.owner = owner;
     box.innerHTML = "";
+    selectionRefreshers = [];
     if (!el) return;
     const add = (label, get, set) => {
       const wrap = document.createElement("label");
       wrap.innerHTML = `<input type="color" aria-label="${label}">${label}`;
       const input = wrap.querySelector("input");
-      input.value = get();
-      input.addEventListener("input", () => mutate((d) => set(d.elements.find((e) => e.id === el.id), input.value), "sel" + label + el.id));
+      input.value = get(el);
+      input.addEventListener("input", () => mutate((d) => set(d.elements.find((e) => e.id === owner), input.value), "sel" + label + owner));
+      selectionRefreshers.push((current) => (input.value = get(current)));
       box.appendChild(wrap);
     };
     if (el.type === "boat") {
-      add("Sail", () => el.sailColor || "#f0eada", (e, v) => (e.sailColor = v));
-      add("Hull", () => el.hullColor || "#96643c", (e, v) => (e.hullColor = v));
+      add("Sail", (e) => e.sailColor || "#f0eada", (e, v) => (e.sailColor = v));
+      add("Hull", (e) => e.hullColor || "#96643c", (e, v) => (e.hullColor = v));
     } else if (el.type === "shape" || el.type === "svg") {
-      add("Fill", () => el.color, (e, v) => (e.color = v));
+      add("Fill", (e) => e.color, (e, v) => (e.color = v));
     } else {
       box.innerHTML = `<span style="color:var(--muted)">${el.type === "dot" ? "Dot" : "Letter stroke"}: colour follows the letter emphasis.</span>`;
     }
@@ -1087,16 +1099,17 @@ globalThis.WaveCore = (() => {
     e.target.value = "";
     if (!file) return;
     try {
-      const { rings, color } = svgToRings(await file.text());
+      const { parts, color } = svgToParts(await file.text());
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const ring of rings) for (const [x, y] of ring) {
+      for (const ring of parts.flat()) for (const [x, y] of ring) {
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
       }
       const size = (W() * 0.35) / Math.max(x1 - x0, y1 - y0, 1e-6);
       const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-      const local = rings.map((ring) => ring.map(([x, y]) => [Math.round((x - cx) * size * 100) / 100, Math.round((y - cy) * size * 100) / 100]));
+      const round = (v) => Math.round(v * size * 100) / 100;
+      const local = parts.map((rings) => rings.map((ring) => ring.map(([x, y]) => [round(x - cx), round(y - cy)])));
       const el = addElement({ id: newId(), type: "svg", name: file.name, transform: { x: W() / 2, y: H() / 2, s: 1, r: 0 },
-        color: color || design.palette.letter, rings: local });
+        color: color || design.palette.letter, parts: local });
       setTool("select");
       select(el.id);
     } catch (err) {
@@ -1104,14 +1117,19 @@ globalThis.WaveCore = (() => {
     }
   });
 
-  // Flatten every filled shape of an SVG into polygons, using the browser's own path geometry.
-  function svgToRings(text) {
+  // Flatten every filled shape of an SVG into polygons (one part per shape), using the browser's own path geometry.
+  function svgToParts(text) {
     const doc = new DOMParser().parseFromString(text, "image/svg+xml");
     if (doc.querySelector("parsererror") || doc.documentElement.nodeName.toLowerCase() !== "svg") {
       throw new Error("That file is not a readable SVG.");
     }
     const host = document.createElement("div");
     host.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden";
+    // only geometry is needed: drop anything that could run code once attached
+    for (const bad of doc.querySelectorAll("script, image, foreignObject, iframe")) bad.remove();
+    for (const node of doc.querySelectorAll("*")) {
+      for (const attr of [...node.attributes]) if (/^on/i.test(attr.name)) node.removeAttribute(attr.name);
+    }
     const svg = document.importNode(doc.documentElement, true);
     svg.setAttribute("width", "1000");
     svg.setAttribute("height", "1000");
@@ -1119,19 +1137,21 @@ globalThis.WaveCore = (() => {
     document.body.appendChild(host);
     try {
       const rootInv = svg.getScreenCTM().inverse();
-      const rings = [];
+      const parts = [];
       let color = null;
       for (const el of svg.querySelectorAll("path, polygon, polyline, rect, circle, ellipse")) {
         if (el.closest("defs, clipPath, mask, symbol, pattern")) continue;
         const len = el.getTotalLength();
         if (!(len > 0)) continue;
         const fill = getComputedStyle(el).fill;
-        if (!color && fill && fill.startsWith("rgb")) {
+        if (!fill || fill === "none") continue; // outline-only shapes are not silhouettes
+        if (!color && fill.startsWith("rgb")) {
           color = "#" + fill.match(/\d+/g).slice(0, 3).map((v) => (+v).toString(16).padStart(2, "0")).join("");
         }
         const m = rootInv.multiply(el.getScreenCTM());
         const n = Math.min(4000, Math.max(24, Math.ceil(len / 2)));
         const stepLen = len / n;
+        const rings = [];
         let ring = [], prev = null;
         for (let i = 0; i <= n; i++) {
           const q = el.getPointAtLength(Math.min(len, i * stepLen));
@@ -1144,9 +1164,10 @@ globalThis.WaveCore = (() => {
           prev = q;
         }
         if (ring.length >= 3) rings.push(ring);
+        if (rings.length) parts.push(rings);
       }
-      if (!rings.length) throw new Error("No filled shapes found in that SVG.");
-      return { rings, color };
+      if (!parts.length) throw new Error("No filled shapes found in that SVG.");
+      return { parts, color };
     } finally {
       host.remove();
     }

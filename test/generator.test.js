@@ -91,8 +91,9 @@ test("dots, boats, shapes and imported SVGs are filled obstacles the sea never e
     { id: "b", type: "boat", transform: { x: 120, y: 120, s: 1, r: 0.3 } },
     { id: "sh", type: "shape", transform: { ...identity }, color: "#aa5500",
       rings: [[[30, 180], [80, 180], [80, 220], [30, 220]]] },
+    // two overlapping parts: the overlap must stay filled, not cancel out
     { id: "sv", type: "svg", transform: { x: 150, y: 210, s: 2, r: 0 }, color: "#112233",
-      rings: [[[-10, -10], [10, -10], [10, 10], [-10, 10]]] },
+      parts: [[[[-10, -10], [5, -10], [5, 10], [-10, 10]]], [[[-5, -10], [10, -10], [10, 10], [-5, 10]]]] },
   ];
   const out = core.generate(d, "full");
 
@@ -104,6 +105,9 @@ test("dots, boats, shapes and imported SVGs are filled obstacles the sea never e
   assert.ok(out.fills.some((f) => f.color === "#aa5500") && out.fills.some((f) => f.color === "#112233"));
   const boatFills = out.fills.filter((f) => f.kind === "boat");
   assert.strictEqual(boatFills.length, 2, "boat = sail + hull");
+
+  const svgFills = out.fills.filter((f) => f.kind === "svg");
+  assert.ok(svgFills.length === 2 && svgFills.every((f) => insideRings(f.rings, 150, 210)), "overlap covered by both parts");
 
   for (const line of out.streamlines) for (const [x, y] of line) {
     for (const [name, inside] of Object.entries(known)) assert.ok(!inside(x, y), `streamline inside ${name} at ${x},${y}`);

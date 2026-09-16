@@ -14,7 +14,7 @@ function sampleDesign() {
     { id: "b1", type: "boat", transform: { x: 120, y: 90, s: 0.8, r: -0.1 } },
     // name with markup characters must survive embedding
     { id: "sv", type: "svg", name: 'logo <"club"> & co', transform: { x: 50, y: 200, s: 1, r: 0 }, color: "#123456",
-      rings: [[[0, 0], [10, 0], [10, 10]], [[2, 2], [4, 2], [4, 4]]] },
+      parts: [[[[0, 0], [10, 0], [10, 10]], [[2, 2], [4, 2], [4, 4]]]] },
   ];
   return d;
 }
