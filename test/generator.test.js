@@ -183,60 +183,75 @@ test("accents scatter dots and flecks in the gaps, never on letters or obstacles
   }
 });
 
-// Corners and centre of a placed surfer picture: [x, y, heading angle, length, width] in mm
-function surferFootprint({ x, y, angle, length, width }) {
+// Corners and centre of a placed figure: [x, y, heading angle, length, width] in mm
+function footprint({ x, y, angle, length, width }) {
   const ux = Math.cos(angle), uy = Math.sin(angle);
   return [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) =>
     [x + (a * length / 2) * ux - (b * width / 2) * uy, y + (a * length / 2) * uy + (b * width / 2) * ux]);
 }
 
-test("surfer pictures ride on top of the sea along the flow, away from letters and shapes, each with a wake", () => {
+// Checks shared by scattered figures and riding stamps: along the flow, clear of letters and shapes, wake behind
+function assertRides(out, f, spacing) {
+  for (const p of footprint(f)) {
+    assert.ok(!inBox(p), "figure on the shape");
+    assert.ok(Math.abs(p[0] - 100) >= spacing / 2 || p[1] < 36 || p[1] > 204, `figure on letter at ${p}`);
+  }
+  // heading follows the sea lines running close to the figure (orientation only: either way along the line)
+  let best = null;
+  for (const line of out.streamlines) for (let i = 1; i < line.length; i++) {
+    const dist = Math.hypot(line[i][0] - f.x, line[i][1] - f.y);
+    if (!best || dist < best.dist) best = { dist, a: Math.atan2(line[i][1] - line[i - 1][1], line[i][0] - line[i - 1][0]) };
+  }
+  const diff = Math.abs(Math.sin(best.a - f.angle));
+  assert.ok(best.dist < spacing && diff < Math.sin(Math.PI / 7), `heading off the flow by ${Math.asin(diff)} rad`);
+  // wake: foam in the palette's lightest colour, trailing behind the tail (it may curve with the flow)
+  const along = (p) => (p[0] - f.x) * Math.cos(f.angle) + (p[1] - f.y) * Math.sin(f.angle);
+  const wake = out.ribbons.filter((r) => r.kind === "wake" && r.figure === out.figures.indexOf(f));
+  assert.ok(wake.length > 0, "figure without a wake");
+  assert.ok(wake.every((r) => r.color === "#eee8d6"), "wake colour");
+  const pts = wake.flatMap((r) => r.points);
+  assert.ok(pts.every((p) => along(p) < f.length * 0.1), "wake reaches in front of the figure");
+  const tail = [f.x - (Math.cos(f.angle) * f.length) / 2, f.y - (Math.sin(f.angle) * f.length) / 2];
+  assert.ok(Math.max(...pts.map((p) => Math.hypot(p[0] - tail[0], p[1] - tail[1]))) > f.length, "wake too short");
+}
+const seaUnder = (out, figures) => out.streamlines.some((line) => line.some(([px, py]) => figures.some((f) =>
+  Math.abs((px - f.x) * Math.cos(f.angle) + (py - f.y) * Math.sin(f.angle)) < f.length / 3 &&
+  Math.abs(-(px - f.x) * Math.sin(f.angle) + (py - f.y) * Math.cos(f.angle)) < f.width / 3)));
+
+test("surfers from the figure library ride on top of the sea along the flow, away from letters and shapes, each with a wake", () => {
   const d = design();
   d.drawing.elements = [verticalStroke(), box];
-  assert.strictEqual(core.generate(d, "full").surfers.length, 0);
+  assert.strictEqual(core.generate(d, "full").figures.length, 0);
 
   d.style.variety.surfers = 1;
   const out = core.generate(d, "full");
-  assert.ok(out.surfers.length > 0, "no surfers placed");
-  const spacing = d.style.sea.spacingMm;
-  for (const s of out.surfers) {
-    assert.ok(Number.isInteger(s.sprite) && s.sprite >= 0, `sprite index ${s.sprite}`);
-    for (const p of surferFootprint(s)) {
-      assert.ok(!inBox(p), "surfer on the shape");
-      assert.ok(Math.abs(p[0] - 100) >= spacing / 2 || p[1] < 36 || p[1] > 204, `surfer on letter at ${p}`);
-    }
-    // heading follows the sea lines running close to the surfer (orientation only: either way along the line)
-    let best = null;
-    for (const line of out.streamlines) for (let i = 1; i < line.length; i++) {
-      const dist = Math.hypot(line[i][0] - s.x, line[i][1] - s.y);
-      if (!best || dist < best.dist) best = { dist, a: Math.atan2(line[i][1] - line[i - 1][1], line[i][0] - line[i - 1][0]) };
-    }
-    const diff = Math.abs(Math.sin(best.a - s.angle));
-    assert.ok(best.dist < spacing && diff < Math.sin(Math.PI / 7), `surfer heading off the flow by ${Math.asin(diff)} rad`);
-    // wake: foam in the palette's lightest colour, trailing behind the tail (it may curve with the flow)
-    const along = (p) => (p[0] - s.x) * Math.cos(s.angle) + (p[1] - s.y) * Math.sin(s.angle);
-    const wake = out.ribbons.filter((r) => r.kind === "wake" && r.surfer === out.surfers.indexOf(s));
-    assert.ok(wake.length > 0, "surfer without a wake");
-    assert.ok(wake.every((r) => r.color === "#eee8d6"), "wake colour");
-    const pts = wake.flatMap((r) => r.points);
-    assert.ok(pts.every((p) => along(p) < s.length * 0.1), "wake reaches in front of the surfer");
-    const tail = [s.x - (Math.cos(s.angle) * s.length) / 2, s.y - (Math.sin(s.angle) * s.length) / 2];
-    assert.ok(Math.max(...pts.map((p) => Math.hypot(p[0] - tail[0], p[1] - tail[1]))) > s.length, "wake too short");
+  assert.ok(out.figures.length > 0, "no surfers placed");
+  for (const f of out.figures) {
+    assert.strictEqual(core.figure(f.figure).kind, "surfer", `${f.figure} is not a surfer`);
+    assertRides(out, f, d.style.sea.spacingMm);
   }
-  // the sea keeps running underneath: surfers sit on top of the waves
-  const under = out.streamlines.some((line) => line.some(([px, py]) => out.surfers.some((s) =>
-    Math.abs((px - s.x) * Math.cos(s.angle) + (py - s.y) * Math.sin(s.angle)) < s.length / 3 &&
-    Math.abs(-(px - s.x) * Math.sin(s.angle) + (py - s.y) * Math.cos(s.angle)) < s.width / 3)));
-  assert.ok(under, "no sea under the surfers");
+  assert.ok(seaUnder(out, out.figures), "no sea under the surfers");
+});
+
+test("the boats slider scatters only boats, sized by boat size", () => {
+  const d = design();
+  d.drawing.canvas = { widthCm: 30, heightCm: 40 };
+  d.style.variety.boats = 1;
+  d.style.variety.boatSize = 5;
+  const out = core.generate(d, "full");
+  assert.ok(out.figures.length > 0, "no boats placed");
+  assert.ok(out.figures.every((f) => core.figure(f.figure).kind === "boat"), "a surfer among the boats");
+  const lengths = out.figures.map((f) => f.length).sort((a, b) => a - b);
+  assert.ok(lengths[0] >= 40 && lengths[lengths.length - 1] <= 100, `5 cm boats are ${lengths} mm long`);
 });
 
 test("surfer size sets how long the surfers are printed", () => {
   const d = design();
   d.style.variety.surfers = 1;
   d.style.variety.surferSize = 3;
-  const small = core.generate(d, "full").surfers;
+  const small = core.generate(d, "full").figures;
   d.style.variety.surferSize = 6;
-  const big = core.generate(d, "full").surfers;
+  const big = core.generate(d, "full").figures;
   const median = (ss) => ss.map((s) => s.length).sort((a, b) => a - b)[ss.length >> 1];
   assert.ok(small.length && big.length);
   assert.ok(Math.abs(median(big) / median(small) - 2) < 0.6, `sizes ${median(small)} vs ${median(big)}`);
@@ -346,7 +361,7 @@ test("every flow preset produces a filled sea, and Ripcurl brings surfers", () =
     core.applyFlowPreset(d.style, n);
     const out = core.generate(d, "preview");
     assert.ok(out.ribbons.length > 20, `${n}: ${out.ribbons.length} ribbons`);
-    if (n === "Ripcurl") assert.ok(out.surfers.length > 0, "Ripcurl without surfers");
+    if (n === "Ripcurl") assert.ok(out.figures.length > 0, "Ripcurl without surfers");
   }
 });
 
