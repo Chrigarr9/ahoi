@@ -711,3 +711,47 @@ test("erasing through a pressure stroke keeps the pressure and brush on both pie
     });
   }
 });
+
+const textElement = (props = {}) => ({ id: "tx", type: "text", transform: { x: 100, y: 125, s: 1, r: 0 }, text: "HIH", font: "Readability",
+  heightCm: 4, lineSpacing: 1.2, letterSpacing: 0, slant: 0, align: "center", brush: "round", size: 3, mode: "visible", color: "#aa0000", ...props });
+const bounds = (lines) => {
+  const pts = lines.flat();
+  return { x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), y1: Math.max(...pts.map((p) => p[1])) };
+};
+
+test("typed text paints its letters as brush strokes, capitals as tall as the letter height, centred on the element, with the waves kept clear", () => {
+  const d = design();
+  d.drawing.elements = [textElement()];
+  const out = core.generate(d);
+
+  const paint = out.ribbons.filter((r) => r.kind === "paint");
+  assert.ok(paint.length >= 3 && paint.every((r) => r.color === "#aa0000"), `${paint.length} painted letter strokes`);
+  const b = bounds(out.letterStrokes);
+  assert.ok(Math.abs(b.y1 - b.y0 - 40) < 1, `capital H is ${b.y1 - b.y0} mm tall`);
+  assert.ok(Math.abs((b.x0 + b.x1) / 2 - 100) < 1 && Math.abs((b.y0 + b.y1) / 2 - 125) < 1, "text centred on its position");
+  const waves = out.streamlines.flat();
+  const nearest = Math.min(...paint.map((r) => Math.min(...waves.map((p) => distanceToLine(r.points, p)))));
+  assert.ok(nearest >= d.style.sea.spacingMm / 2, `a wave comes within ${nearest} mm of a painted letter`);
+});
+
+test("font, letter spacing, line spacing, alignment and slant each reshape typed text", () => {
+  const lines = (props) => core.textLines(textElement(props));
+  const size = (props) => { const b = bounds(lines(props)); return { w: b.x1 - b.x0, h: b.y1 - b.y0 }; };
+  const plain = size({});
+
+  assert.notDeepStrictEqual(lines({ font: "Allure" }), lines({}), "another font draws other letters");
+  assert.ok(Math.abs(size({ letterSpacing: 0.5 }).w - plain.w - 2 * 0.5 * 40) < 0.5, "letter spacing adds half a letter height between each of three letters");
+  // two lines of H: 40 mm letters, baselines 2 letter heights apart -> 80 + 40 mm tall
+  assert.ok(Math.abs(size({ text: "H\nH", lineSpacing: 2 }).h - 120) < 0.5, `two lines ${size({ text: "H\nH", lineSpacing: 2 }).h} mm tall`);
+
+  // a short line under a long one: its letters sit at the left edge, the middle or the right edge of the long line
+  const shortLine = (align) => { const all = lines({ text: "HIHIH\nI", align }); const b = bounds(all);
+    const low = bounds(all.filter((pts) => pts.every(([, y]) => y > (b.y0 + b.y1) / 2))); return [low.x0 - b.x0, b.x1 - low.x1]; };
+  const [leftGap] = shortLine("left"), [cLeft, cRight] = shortLine("center"), [, rightGap] = shortLine("right");
+  assert.ok(leftGap < 8 && rightGap < 8 && Math.abs(cLeft - cRight) < 1, `left ${leftGap}, centre ${cLeft}/${cRight}, right ${rightGap}`);
+
+  // slanted, the top of the upright I leans to the right of its foot
+  const stem = lines({ text: "I", slant: 20 }).sort((a, b) => b.length - a.length)[0];
+  const [top, foot] = [stem.reduce((a, p) => (p[1] < a[1] ? p : a)), stem.reduce((a, p) => (p[1] > a[1] ? p : a))];
+  assert.ok(Math.abs((top[0] - foot[0]) / (foot[1] - top[1]) - Math.tan((20 * Math.PI) / 180)) < 0.05, "leans by the slant angle");
+});

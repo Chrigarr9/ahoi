@@ -157,3 +157,13 @@ test("a design saved before edge fade opens with the fade off, and fade settings
   Object.assign(d.style.edges, { enabled: true, fadeWidth: 45, fadeShorter: 0.4, fadeThinner: 0.7, fadeSparser: 0.25 });
   assert.deepStrictEqual(plain(core.loadDesignFromSVG(core.exportSVG(d, core.generate(d))).style.edges), plain(d.style.edges));
 });
+
+test("typed text with its font, layout and brush survives export and reopen", () => {
+  const d = sampleDesign();
+  d.drawing.elements.push({ id: "tx", type: "text", transform: { x: 100, y: 120, s: 1.2, r: 0.1 }, text: "Ahoi\nCrew <&>", font: "Allure", heightCm: 3.5,
+    lineSpacing: 1.8, letterSpacing: 0.1, slant: -8, align: "right", brush: "calligraphy", size: 6, mode: "visible", color: { palette: 2 }, nib: 30 });
+  const svg = core.exportSVG(d, core.generate(d));
+  const plain = (o) => JSON.parse(JSON.stringify(o));
+  assert.deepStrictEqual(plain(core.loadDesignFromSVG(svg)).drawing.elements, plain(d.drawing.elements));
+  assert.ok((svg.match(/<path /g) || []).length > 20, "the letters are painted into the print");
+});
