@@ -1221,7 +1221,10 @@ globalThis.WaveCore = (() => {
   function localOutlines(el) {
     switch (el.type) {
       case "stroke": return [el.points];
-      case "text": return textLines(el);
+      case "text": { // text without visible letters keeps a letter-sized box, so it can still be selected
+        const lines = textLines(el), h = ((el.heightCm ?? TEXT_DEFAULTS.heightCm) * 10) / 2;
+        return lines.length ? lines : [[[-h, -h], [h, -h], [h, h], [-h, h], [-h, -h]]];
+      }
       case "dot": return [circleRing(el.radius)];
       case "boat": return [BOAT.sail, BOAT.hull];
       case "svg": return el.parts.flat();
@@ -2051,7 +2054,7 @@ globalThis.WaveCore = (() => {
       for (const line of worldOutlines(el)) {
         ctx.beginPath();
         line.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-        if (el.type !== "stroke") ctx.closePath();
+        if (el.type !== "stroke" && el.type !== "text") ctx.closePath(); // painted lines stay open
         ctx.stroke();
       }
       const h = handles(el);
@@ -2663,7 +2666,7 @@ globalThis.WaveCore = (() => {
             const p = d.style.palette;
             // paint in this colour keeps it as a fixed colour; paint in later colours follows them to their new place
             for (const el of d.drawing.elements) {
-              if (el.type !== "stroke" || !el.color || typeof el.color.palette !== "number") continue;
+              if ((el.type !== "stroke" && el.type !== "text") || !el.color || typeof el.color.palette !== "number") continue;
               if (el.color.palette === i) el.color = p.strokes[i].color;
               else if (el.color.palette > i) el.color = { palette: el.color.palette - 1 };
             }

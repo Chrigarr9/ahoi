@@ -809,3 +809,15 @@ test("Add text drops text in the middle; typing, font, layout and brush change i
   assert.strictEqual((await exportedDesign(page)).drawing.elements[0].slant, 0);
   assert.deepStrictEqual(page.errors, []);
 });
+
+test("text emptied of letters can still be selected and deleted", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Add text", exact: true }).click();
+  await page.getByLabel("Text", { exact: true }).fill("   ");
+  await page.getByRole("button", { name: "Undo", exact: true }).focus(); // leave the text box
+  await page.mouse.click(...(await at(page, 0.05, 0.05))); // select nothing
+  await page.mouse.click(...(await at(page, 0.5, 0.5)));
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  assert.strictEqual((await exportedDesign(page)).drawing.elements.length, 0);
+  assert.deepStrictEqual(page.errors, []);
+});
