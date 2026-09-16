@@ -664,7 +664,7 @@ globalThis.WaveCore = (() => {
     const o = j * gw + i;
     const c = (C[o] * (1 - tx) + C[o + 1] * tx) * (1 - ty) + (C[o + gw] * (1 - tx) + C[o + gw + 1] * tx) * ty;
     const s = (S[o] * (1 - tx) + S[o + 1] * tx) * (1 - ty) + (S[o + gw] * (1 - tx) + S[o + gw + 1] * tx) * ty;
-    if (c * c + s * s < 0.01) return null;
+    if (!(c * c + s * s >= 0.01)) return null; // also off the grid, where the lookups are undefined
     const a = 0.5 * Math.atan2(s, c);
     let dx = Math.cos(a), dy = Math.sin(a);
     if (dx * px + dy * py < 0) { dx = -dx; dy = -dy; }
@@ -1098,7 +1098,8 @@ globalThis.WaveCore = (() => {
       }
     }
     for (const [kind, amount, sizeCm, area] of [["boat", variety.boats, variety.boatSize, 320], ["surfer", variety.surfers, variety.surferSize, 250]]) {
-      const pool = [...FIGURES.values()].filter((f) => f.kind === kind);
+      // built-in figures only: imports differ per browser and would change the same design from device to device
+      const pool = [...FIGURES.values()].filter((f) => f.kind === kind && !f.imported);
       if (!(amount > 0) || !pool.length) continue;
       const srng = mulberry32(sea.seed * 32452843 + (kind === "boat" ? 11 : 9));
       const wanted = Math.max(1, Math.round(((amount * W * H) / (area * area)) * 2));
@@ -1247,14 +1248,19 @@ globalThis.WaveCore = (() => {
     for (const f of geo.fills) out.push(`<path d="${pathData(f.rings)}" fill="${f.color}" fill-rule="evenodd"/>`);
     const placed = geo.figures || [];
     if (placed.length) { // each picture is embedded once and placed with <use>
+      // the original picture always travels (so it can be restored elsewhere); a recoloured print copy is added when used
+      const printed = new Set();
       out.push("<defs>", ...[...new Set(placed.map((p) => p.figure))].map((id) => {
-        const f = figure(id), href = hrefFor(id);
-        return `<image id="figure-${escapeXml(id)}" data-kind="${f.kind}" data-len="${f.len}" width="${f.w}" height="${f.h}" href="${href}" xlink:href="${href}"/>`;
+        const f = figure(id), href = hrefFor(id), own = `<image id="figure-${escapeXml(id)}" data-kind="${f.kind}" data-len="${f.len}" width="${f.w}" height="${f.h}" href="${f.href}" xlink:href="${f.href}"/>`;
+        if (href === f.href) return own;
+        printed.add(id);
+        return own + `<image id="figure-${escapeXml(id)}-print" width="${f.w}" height="${f.h}" href="${href}" xlink:href="${href}"/>`;
       }), `<filter id="figure-shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="1.2" dy="1.6" stdDeviation="0.9" flood-color="#08142a" flood-opacity=".35"/></filter>`, "</defs>");
       out.push(`<g filter="url(#figure-shadow)">`); // soft shadow on the water, in mm
       for (const p of placed) {
         const { w, h } = figure(p.figure);
-        out.push(`<use href="#figure-${escapeXml(p.figure)}" xlink:href="#figure-${escapeXml(p.figure)}" transform="translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) ` +
+        const ref = `#figure-${escapeXml(p.figure)}${printed.has(p.figure) ? "-print" : ""}`;
+        out.push(`<use href="${ref}" xlink:href="${ref}" transform="translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) ` +
           `rotate(${((p.angle * 180) / Math.PI).toFixed(2)}) scale(${(p.length / w).toFixed(5)}) translate(${-w / 2} ${-h / 2})"/>`);
       }
       out.push("</g>");
@@ -1733,6 +1739,8 @@ globalThis.WaveCore = (() => {
       for (const i of pixels) { const dx = (i % w) - cx, dy = ((i / w) | 0) - cy; xx += dx * dx; yy += dy * dy; xy += dx * dy; }
       const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
       const cw = x1 - x0 + 1, ch = y1 - y0 + 1, crop = document.createElement("canvas");
+      // turned around its centre of mass, so the canvas must reach the farthest bounding-box corner from there
+      const reach = Math.max(...[[x0, y0], [x1 + 1, y0], [x0, y1 + 1], [x1 + 1, y1 + 1]].map(([x, y]) => Math.hypot(x - cx, y - cy)));
       crop.width = cw; crop.height = ch;
       const cropData = crop.getContext("2d").createImageData(cw, ch);
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -1741,7 +1749,7 @@ globalThis.WaveCore = (() => {
         cropData.data.set([px[4 * i], px[4 * i + 1], px[4 * i + 2], Math.round(edge[i] * 255)], o);
       }
       crop.getContext("2d").putImageData(cropData, 0, 0);
-      const side = Math.ceil(Math.hypot(cw, ch)), turned = document.createElement("canvas");
+      const side = Math.ceil(2 * reach) + 2, turned = document.createElement("canvas");
       turned.width = turned.height = side;
       const tx = turned.getContext("2d");
       tx.translate(side / 2, side / 2);
@@ -1780,6 +1788,7 @@ globalThis.WaveCore = (() => {
         const tx = db.transaction("figures", mode), req = fn(tx.objectStore("figures"));
         tx.oncomplete = () => resolve(req && req.result);
         tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error("storage transaction aborted")); // e.g. out of quota
       });
     },
     all() { return this.run("readonly", (s) => s.getAll()); },

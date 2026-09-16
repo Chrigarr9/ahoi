@@ -287,6 +287,20 @@ test("the letter boat can ride on top of the waves with a wake", () => {
   assert.ok(out.ribbons.some((r) => r.kind === "wake" && r.stamp === "b1"), "riding boat without a wake");
 });
 
+test("a stamp following the flow outside the canvas still gets a real angle", () => {
+  const d = design();
+  d.drawing.elements = [stamp({ transform: { x: 100, y: -80, s: 1, r: null } }), stamp({ id: "st2", transform: { x: 100, y: 400, s: 1, r: null } })];
+  for (const f of core.generate(d, "full").figures) assert.ok(Number.isFinite(f.angle), `stamp ${f.stamp} angle ${f.angle}`);
+});
+
+test("scattered surfers only come from the built-in library, so imports elsewhere never change a design", () => {
+  const d = design();
+  d.style.variety.surfers = 1;
+  const before = JSON.stringify(core.generate(d, "full").figures);
+  core.registerFigures([{ id: "imported-x", kind: "surfer", len: 1, w: 200, h: 80, href: "data:image/png;base64,", imported: true }]);
+  assert.strictEqual(JSON.stringify(core.generate(d, "full").figures), before);
+});
+
 test("surfer size sets how long the surfers are printed", () => {
   const d = design();
   d.style.variety.surfers = 1;

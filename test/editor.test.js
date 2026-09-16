@@ -469,7 +469,10 @@ test("figures can be recoloured into the palette so they blend into the sea", as
   await page.getByLabel("Surfers & boats in palette colours").check();
   await page.waitForTimeout(600);
   assert.strictEqual(await warm(), 0, "palette colours: warm pixels left");
-  assert.strictEqual((await exportedDesign(page)).style.palette.figureColours, "palette");
+  const svg = (await download(page, "Export SVG")).toString("utf8");
+  assert.strictEqual(core.loadDesignFromSVG(svg).style.palette.figureColours, "palette");
+  const own = new RegExp(`<image id="figure-(\\w+)" data-kind="surfer"[^>]* href="([^"]+)"`).exec(svg);
+  assert.ok(own && own[2] === core.figure(own[1]).href, "the original picture must travel in the SVG so other devices can switch back to own colours");
   assert.deepStrictEqual(page.errors, []);
 });
 
@@ -538,4 +541,28 @@ test("an imported magenta sheet becomes clean, lying stamps that survive a reloa
   assert.match((await download(other, "Export SVG")).toString("utf8"), new RegExp(`<image id="figure-${stampFigure}"`));
   assert.deepStrictEqual(page.errors, []);
   assert.deepStrictEqual(other.errors, []);
+});
+
+test("importing a lopsided figure keeps its far-reaching parts after laying it flat", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  const surfers = await page.getByRole("button", { name: /^Surfer \d+$/ }).count();
+  // a heavy body with a long thin paddle reaching far out on one side: 40 + 260 px long
+  const png = await page.evaluate(() => {
+    const c = document.createElement("canvas");
+    c.width = 500; c.height = 200;
+    const x = c.getContext("2d");
+    x.fillStyle = "#ff00ff"; x.fillRect(0, 0, 500, 200);
+    x.fillStyle = "#e07030"; x.beginPath(); x.ellipse(80, 100, 40, 40, 0, 0, 2 * Math.PI); x.fill();
+    x.fillRect(80, 96, 260, 8);
+    return c.toDataURL("image/png").split(",")[1];
+  });
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: "Import surfers sheet…", exact: true }).click()]);
+  await chooser.setFiles({ name: "sheet.png", mimeType: "image/png", buffer: Buffer.from(png, "base64") });
+  await page.getByRole("button", { name: `Surfer ${surfers + 1}`, exact: true }).click();
+  await page.mouse.click(...(await at(page, 0.5, 0.5)));
+  const svg = (await download(page, "Export SVG")).toString("utf8");
+  const id = core.loadDesignFromSVG(svg).drawing.elements.find((e) => e.type === "stamp").figure;
+  const [, w] = new RegExp(`<image id="figure-${id}"[^>]* width="(\\d+)"`).exec(svg);
+  assert.ok(+w >= 290, `figure cut off: ${w} px long instead of about 298`);
 });
