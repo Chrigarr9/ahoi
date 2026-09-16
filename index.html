@@ -403,7 +403,31 @@ globalThis.WaveCore = (() => {
     return { width: W, height: H, background: design.palette.background, streamlines: lines, ribbons, fills };
   }
 
-  return { defaultDesign, generate };
+  // ---------- SVG export: print file and editable source in one
+  const escapeXml = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const unescapeXml = (t) => t.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const pathData = (rings) =>
+    rings.map((ring) => "M" + ring.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join("L") + "Z").join("");
+
+  function exportSVG(design, geo) {
+    const out = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${design.canvas.widthCm}cm" height="${design.canvas.heightCm}cm" viewBox="0 0 ${geo.width} ${geo.height}">`,
+      `<metadata id="wave-design">${escapeXml(JSON.stringify(design))}</metadata>`,
+      `<rect width="${geo.width}" height="${geo.height}" fill="${geo.background}"/>`,
+    ];
+    for (const r of geo.ribbons) out.push(`<path d="${pathData([r.points])}" fill="${r.color}"/>`);
+    for (const f of geo.fills) out.push(`<path d="${pathData(f.rings)}" fill="${f.color}" fill-rule="evenodd"/>`);
+    out.push("</svg>");
+    return out.join("\n");
+  }
+
+  function loadDesignFromSVG(text) {
+    const m = /<metadata id="wave-design">([\s\S]*?)<\/metadata>/.exec(text);
+    if (!m) throw new Error("This SVG has no wave design embedded - only SVGs exported from this tool can be reopened.");
+    return JSON.parse(unescapeXml(m[1]));
+  }
+
+  return { defaultDesign, generate, exportSVG, loadDesignFromSVG };
 })();
 </script>
 </body>
