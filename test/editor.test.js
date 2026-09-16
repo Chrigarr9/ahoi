@@ -472,3 +472,70 @@ test("figures can be recoloured into the palette so they blend into the sea", as
   assert.strictEqual((await exportedDesign(page)).style.palette.figureColours, "palette");
   assert.deepStrictEqual(page.errors, []);
 });
+
+// A generated-style sheet: two orange subjects on flat magenta, one lying and one standing upright
+const magentaSheet = (page) => page.evaluate(() => {
+  const c = document.createElement("canvas");
+  c.width = 600; c.height = 300;
+  const x = c.getContext("2d");
+  x.fillStyle = "#ff00ff"; x.fillRect(0, 0, 600, 300);
+  x.fillStyle = "#e07030";
+  x.beginPath(); x.ellipse(150, 150, 90, 28, 0, 0, 2 * Math.PI); x.fill();
+  x.fillStyle = "#2a9d8f";
+  x.beginPath(); x.ellipse(450, 150, 26, 100, 0, 0, 2 * Math.PI); x.fill();
+  return c.toDataURL("image/png").split(",")[1];
+});
+
+async function importSheet(page, button) {
+  const buffer = Buffer.from(await magentaSheet(page), "base64");
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: button, exact: true }).click()]);
+  await chooser.setFiles({ name: "sheet.png", mimeType: "image/png", buffer });
+}
+
+test("an imported magenta sheet becomes clean, lying stamps that survive a reload and travel inside the exported SVG", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  const surfers = await page.getByRole("button", { name: /^Surfer \d+$/ }).count();
+  await importSheet(page, "Import surfers sheet…");
+  await page.getByRole("button", { name: `Surfer ${surfers + 2}`, exact: true }).waitFor();
+
+  for (const [n, fy] of [[1, 0.3], [2, 0.7]]) {
+    await page.getByRole("button", { name: `Surfer ${surfers + n}`, exact: true }).click();
+    await page.mouse.click(...(await at(page, 0.5, fy)));
+  }
+  const svg = (await download(page, "Export SVG")).toString("utf8");
+  const stampFigures = core.loadDesignFromSVG(svg).drawing.elements.filter((e) => e.type === "stamp").map((e) => e.figure);
+  assert.strictEqual(new Set(stampFigures).size, 2);
+  const images = stampFigures.map((id) => new RegExp(`<image id="figure-${id}" data-kind="surfer"[^>]* width="(\\d+)" height="(\\d+)" href="([^"]+)"`).exec(svg));
+  assert.ok(images.every(Boolean), "imported picture not embedded in the SVG");
+  for (const image of images) assert.ok(+image[1] > 2 * +image[2], `subject not laid along its long axis: ${image[1]}x${image[2]}`);
+  const stampFigure = stampFigures[0], image = images[0];
+  const magenta = await page.evaluate(async (href) => {
+    const img = new Image();
+    img.src = href;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.width; c.height = img.height;
+    const x = c.getContext("2d");
+    x.drawImage(img, 0, 0);
+    const d = x.getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 40 && d[i] > 180 && d[i + 2] > 180 && d[i + 1] < 90) n++;
+    return n;
+  }, image[3]);
+  assert.strictEqual(magenta, 0, "magenta left in the cut-out");
+
+  await page.reload();
+  await page.getByRole("status").filter({ hasText: /ms/ }).waitFor();
+  await page.getByRole("button", { name: "Stamp", exact: true }).click();
+  await page.getByRole("button", { name: `Surfer ${surfers + 2}`, exact: true }).waitFor({ timeout: 5000 });
+
+  const other = await openTool(); // a fresh browser profile knows nothing about the import
+  const [chooser] = await Promise.all([other.waitForEvent("filechooser"), other.getByRole("button", { name: "Open SVG…" }).click()]);
+  await chooser.setFiles({ name: "design.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) });
+  await other.getByRole("button", { name: "Stamp", exact: true }).click();
+  await other.getByRole("button", { name: `Surfer ${surfers + 1}`, exact: true }).waitFor({ timeout: 5000 });
+  assert.match((await download(other, "Export SVG")).toString("utf8"), new RegExp(`<image id="figure-${stampFigure}"`));
+  assert.deepStrictEqual(page.errors, []);
+  assert.deepStrictEqual(other.errors, []);
+});

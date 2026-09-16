@@ -134,7 +134,15 @@
         <button id="import-btn" title="Import an SVG silhouette"><span class="icon" aria-hidden="true">⇪</span>Import SVG…</button>
         <button data-tool="select" class="wide" title="Select, move, scale, rotate (V)"><span aria-hidden="true">↖</span>Select</button>
       </div>
-      <div id="stamp-picker" class="figure-grid" role="group" aria-label="Stamps" hidden></div>
+      <div id="stamp-panel" hidden>
+        <div id="stamp-picker" class="figure-grid" role="group" aria-label="Stamps"></div>
+        <div class="row">
+          <button id="import-surfers" title="Cut surfers out of an image with a flat magenta background">Import surfers sheet…</button>
+          <button id="import-boats" title="Cut boats out of an image with a flat magenta background">Import boats sheet…</button>
+        </div>
+        <button id="flip-figure" title="Turn the picked imported figure around if it faces backwards" disabled>Flip picked figure</button>
+        <input type="file" id="figure-sheet" accept="image/*" hidden>
+      </div>
       <input type="file" id="import-file" accept=".svg,image/svg+xml" hidden>
       <div class="row">
         <button id="undo" title="Ctrl+Z">Undo</button>
@@ -1642,7 +1650,7 @@ globalThis.WaveCore = (() => {
     $("hint").textContent = HINTS[t] + NAV_HINT;
     stage.style.cursor = t === "select" ? "default" : t === "eraser" ? "none" : "crosshair";
     $("eraser-size").hidden = t !== "eraser";
-    $("stamp-picker").hidden = t !== "stamp";
+    $("stamp-panel").hidden = t !== "stamp";
     select(t === "select" ? selectedId : null);
   }
   function buildStampPicker() {
@@ -1661,10 +1669,159 @@ globalThis.WaveCore = (() => {
       b.addEventListener("click", () => {
         ui.stampFigure = id;
         for (const other of picker.children) other.setAttribute("aria-pressed", String(other === b));
+        $("flip-figure").disabled = !core.figure(id)?.imported;
       });
       picker.appendChild(b);
     }
   }
+  // ---------- figure sheets: subjects cut out of a flat magenta background, laid along their long axis
+  async function cutFigureSheet(file, kind) {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.src = url;
+    try { await img.decode(); } finally { URL.revokeObjectURL(url); }
+    const w = img.naturalWidth, h = img.naturalHeight, n = w * h;
+    const sheet = document.createElement("canvas");
+    sheet.width = w; sheet.height = h;
+    const sx = sheet.getContext("2d");
+    sx.drawImage(img, 0, 0);
+    const data = sx.getImageData(0, 0, w, h), px = data.data, alpha = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = px[4 * i], g = px[4 * i + 1], b = px[4 * i + 2];
+      const m = Math.max(0, Math.min(1, (Math.min(r, b) - g - 60) / 120)); // how magenta the pixel is
+      alpha[i] = 1 - m;
+      const spill = Math.max(0, Math.min(r, b) - g) * Math.min(1, m * 1.5); // pull the magenta tint out of edge pixels
+      px[4 * i] -= spill; px[4 * i + 2] -= spill;
+    }
+    // shrink the edge by a pixel (drops the pink fringe), then grow a mask so a subject's loose parts stay together
+    const pass = (src, radius, pick, horizontal) => {
+      const out = new Float32Array(n);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let v = src[y * w + x];
+        for (let d = -radius; d <= radius; d++) {
+          const xx = horizontal ? x + d : x, yy = horizontal ? y : y + d;
+          if (xx >= 0 && yy >= 0 && xx < w && yy < h) v = pick(v, src[yy * w + xx]);
+        }
+        out[y * w + x] = v;
+      }
+      return out;
+    };
+    const edge = pass(pass(alpha, 1, Math.min, true), 1, Math.min, false);
+    const fg = edge.map((a) => (a > 0.5 ? 1 : 0));
+    const grown = pass(pass(fg, 4, Math.max, true), 4, Math.max, false);
+    const label = new Int32Array(n), entries = [];
+    for (let start = 0, id = 0; start < n; start++) {
+      if (!grown[start] || label[start]) continue;
+      id++;
+      const stack = [start], pixels = [];
+      label[start] = id;
+      let x0 = w, y0 = h, x1 = 0, y1 = 0;
+      while (stack.length) {
+        const i = stack.pop(), x = i % w, y = (i - x) / w;
+        if (fg[i]) { pixels.push(i); x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i - w, i + w]) {
+          if (j >= 0 && j < n && grown[j] && !label[j]) { label[j] = id; stack.push(j); }
+        }
+      }
+      if (pixels.length < 300) continue; // specks
+      let cx = 0, cy = 0, xx = 0, yy = 0, xy = 0;
+      for (const i of pixels) { cx += i % w; cy += (i / w) | 0; }
+      cx /= pixels.length; cy /= pixels.length;
+      for (const i of pixels) { const dx = (i % w) - cx, dy = ((i / w) | 0) - cy; xx += dx * dx; yy += dy * dy; xy += dx * dy; }
+      const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
+      const cw = x1 - x0 + 1, ch = y1 - y0 + 1, crop = document.createElement("canvas");
+      crop.width = cw; crop.height = ch;
+      const cropData = crop.getContext("2d").createImageData(cw, ch);
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const i = y * w + x, o = 4 * ((y - y0) * cw + (x - x0));
+        if (label[i] !== id) continue;
+        cropData.data.set([px[4 * i], px[4 * i + 1], px[4 * i + 2], Math.round(edge[i] * 255)], o);
+      }
+      crop.getContext("2d").putImageData(cropData, 0, 0);
+      const side = Math.ceil(Math.hypot(cw, ch)), turned = document.createElement("canvas");
+      turned.width = turned.height = side;
+      const tx = turned.getContext("2d");
+      tx.translate(side / 2, side / 2);
+      tx.rotate(-angle);
+      tx.drawImage(crop, -(cx - x0) , -(cy - y0));
+      entries.push(trimmed(turned, kind));
+    }
+    return entries;
+  }
+  // Crop a canvas to its visible pixels and turn it into a figure entry
+  function trimmed(canvas, kind, id = "u" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)) {
+    const x = canvas.getContext("2d"), d = x.getImageData(0, 0, canvas.width, canvas.height).data;
+    let x0 = canvas.width, y0 = canvas.height, x1 = -1, y1 = -1;
+    for (let y = 0; y < canvas.height; y++) for (let xx = 0; xx < canvas.width; xx++) {
+      if (d[4 * (y * canvas.width + xx) + 3] > 8) { x0 = Math.min(x0, xx); y0 = Math.min(y0, y); x1 = Math.max(x1, xx); y1 = Math.max(y1, y); }
+    }
+    const out = document.createElement("canvas");
+    out.width = Math.max(1, x1 - x0 + 1); out.height = Math.max(1, y1 - y0 + 1);
+    out.getContext("2d").drawImage(canvas, -x0, -y0);
+    return { id, kind, len: 1, w: out.width, h: out.height, href: out.toDataURL("image/webp", 0.9), imported: true };
+  }
+  // Imported figures live in IndexedDB, so they survive reloads without bloating the design or the undo history
+  const figureStore = {
+    db: null,
+    open() {
+      return (this.db ??= new Promise((resolve, reject) => {
+        const req = indexedDB.open("wave-name-studio", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("figures", { keyPath: "id" });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      }));
+    },
+    async run(mode, fn) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("figures", mode), req = fn(tx.objectStore("figures"));
+        tx.oncomplete = () => resolve(req && req.result);
+        tx.onerror = () => reject(tx.error);
+      });
+    },
+    all() { return this.run("readonly", (s) => s.getAll()); },
+    put(list) { return this.run("readwrite", (s) => { for (const f of list) s.put(f); }); },
+  };
+  function addFigures(list) {
+    core.registerFigures(list);
+    figureStore.put(list).catch(() => toast("Could not store the figures in this browser; they last until you reload.", true));
+    buildStampPicker();
+    schedulePreview(true);
+  }
+  let sheetKind = "surfer";
+  $("import-surfers").addEventListener("click", () => { sheetKind = "surfer"; $("figure-sheet").click(); });
+  $("import-boats").addEventListener("click", () => { sheetKind = "boat"; $("figure-sheet").click(); });
+  $("figure-sheet").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const list = await cutFigureSheet(file, sheetKind);
+      if (!list.length) return toast("No figures found: the sheet needs a flat magenta (#FF00FF) background.", true);
+      addFigures(list);
+      toast(`Imported ${list.length} ${sheetKind === "boat" ? "boats" : "surfers"}.`);
+    } catch (err) {
+      toast("Could not read that image.", true);
+    }
+  });
+  $("flip-figure").addEventListener("click", async () => {
+    const f = core.figure(ui.stampFigure);
+    if (!f || !f.imported) return;
+    const img = new Image();
+    img.src = f.href;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = f.w; c.height = f.h;
+    const x = c.getContext("2d");
+    x.translate(f.w, f.h);
+    x.rotate(Math.PI);
+    x.drawImage(img, 0, 0);
+    const flipped = { ...f, href: c.toDataURL("image/webp", 0.9) };
+    figureImages.delete(f.id);
+    for (const key of recoloured.keys()) if (key.startsWith(f.id + "[")) recoloured.delete(key);
+    addFigures([flipped]);
+  });
+  figureStore.all().then((list) => { if (list.length) { core.registerFigures(list); buildStampPicker(); schedulePreview(true); } }).catch(() => {});
+
   function addElement(el) {
     mutate((d) => d.drawing.elements.push(el));
     return el;
@@ -2199,7 +2356,12 @@ globalThis.WaveCore = (() => {
     e.target.value = "";
     if (!file) return;
     try {
-      const loaded = core.loadDesignFromSVG(await file.text());
+      const text = await file.text();
+      const loaded = core.loadDesignFromSVG(text);
+      // pictures imported on another device travel inside the SVG
+      const unknown = [...text.matchAll(/<image id="figure-([^"]+)" data-kind="(surfer|boat)" data-len="([\d.]+)" width="(\d+)" height="(\d+)" href="([^"]+)"/g)]
+        .filter((m) => !core.figure(m[1])).map((m) => ({ id: m[1], kind: m[2], len: +m[3], w: +m[4], h: +m[5], href: m[6], imported: true }));
+      if (unknown.length) addFigures(unknown);
       snapshot();
       design = loaded;
       selectedId = null;
