@@ -233,13 +233,14 @@ globalThis.WaveCore = (() => {
 
   // Flow presets set the sea's shape (never seed or spacing) and, where it defines the look, the variety.
   const FLOW_DEFAULTS = { tilt: 0, turbulence: 0.35, scale: 220, length: 90, width: 0.6, taper: 0.5, vortices: 0, gradient: 0, rings: 0, fold: 0,
-    strokeType: "dashes", swell: 0.6 };
+    strokeType: "dashes", swell: 0.6, waves: 0, wavelength: 120 };
   const FLOW_PRESETS = {
     Calm: { sea: { turbulence: 0.25, scale: 260, length: 120 } },
     "Diagonal breeze": { sea: { tilt: -15, scale: 200 } },
     Stormy: { sea: { turbulence: 0.9, scale: 110, length: 70, width: 0.55, taper: 0.6 } },
     "Hokusai curls": { sea: { tilt: 5, turbulence: 1.5, scale: 70, length: 150, width: 0.65, taper: 0.8 } },
-    "Reference look": { sea: { tilt: -5, turbulence: 0.8, scale: 150, length: 130, width: 0.72, taper: 0.4, strokeType: "bands", swell: 0.45 },
+    "Reference look": { sea: { tilt: -5, turbulence: 0.35, scale: 180, length: 130, width: 0.72, taper: 0.4, strokeType: "bands", swell: 0.45,
+      waves: 0.55, wavelength: 130 },
       variety: { width: 0.2, spacing: 0.2, overlay: 0.25, accents: 0.05 } },
     Ripples: { sea: { turbulence: 0.5, scale: 60, length: 35, width: 0.5, taper: 0.6 } },
     Whirlpool: { sea: { turbulence: 0.3, scale: 200, length: 160, vortices: 5 } },
@@ -359,6 +360,7 @@ globalThis.WaveCore = (() => {
       next.sea.taper = round(clamp(jitter(next.sea.taper, 0.2), 0, 1));
       if (rng() < 0.35) next.sea.strokeType = "bands";
       next.sea.swell = round(0.3 + 0.6 * rng());
+      if (rng() < 0.5) { next.sea.waves = round(0.2 + 0.6 * rng()); next.sea.wavelength = Math.round(60 + 140 * rng()); }
       next.sea.seed = Math.floor(rng() * 1e6);
     }
     if (groups.colours) {
@@ -448,6 +450,7 @@ globalThis.WaveCore = (() => {
     const C = new Float32Array(N), S = new Float32Array(N);
     const tilt = (sea.tilt * Math.PI) / 180;
     const fold = sea.fold || 0, gradient = sea.gradient || 0, rings = sea.rings || 0;
+    const waves = sea.waves || 0, wavelength = sea.wavelength || 120;
     // tidal rings circle a centre below the canvas; vortices are seeded whirlpools
     const rcx = W / 2, rcy = H * 1.35;
     const vrng = mulberry32(sea.seed * 31 + 7);
@@ -462,7 +465,13 @@ globalThis.WaveCore = (() => {
           v += fold * 1.2 * fbm(u * 0.7 - 3.1, v * 0.7 + 7.7, sea.seed + 93);
         }
         const turbulence = sea.turbulence * Math.max(0, 1 + gradient * ((y / H) * 2 - 1));
-        const th = tilt + turbulence * fbm(u, v, sea.seed);
+        let th = tilt + turbulence * fbm(u, v, sea.seed);
+        if (waves) { // lines rise and fall like a sine along the main direction; crests drift slowly across the sea
+          const along = x * Math.cos(tilt) + y * Math.sin(tilt);
+          const drift = 2 * Math.PI * 0.9 * fbm(x / (sea.scale * 1.5) + 17.1, y / (sea.scale * 1.5) - 4.3, sea.seed + 53);
+          const height = waves * Math.max(0.35, 1 + 0.45 * fbm(x / sea.scale - 9.7, y / sea.scale + 3.1, sea.seed + 61)); // uneven wave heights
+          th += Math.atan(height * 1.6 * Math.cos((2 * Math.PI * along) / wavelength + drift));
+        }
         let c = Math.cos(2 * th), s = Math.sin(2 * th);
         if (rings) {
           const a = Math.atan2(y - rcy, x - rcx) + Math.PI / 2;
@@ -1582,6 +1591,8 @@ globalThis.WaveCore = (() => {
   const mm = (v) => v + " mm";
   const flow = $("flow-controls");
   slider(flow, { label: "Tilt", min: -90, max: 90, step: 1, fmt: (v) => v + "°", get: (s) => s.sea.tilt, set: (s, v) => (s.sea.tilt = v) });
+  slider(flow, { label: "Wave height", min: 0, max: 1, step: 0.05, fmt: pct, get: (s) => s.sea.waves, set: (s, v) => (s.sea.waves = v) });
+  slider(flow, { label: "Wave length", min: 20, max: 400, step: 5, fmt: mm, get: (s) => s.sea.wavelength, set: (s, v) => (s.sea.wavelength = v) });
   slider(flow, { label: "Turbulence", min: 0, max: 2, step: 0.05, get: (s) => s.sea.turbulence, set: (s, v) => (s.sea.turbulence = v) });
   slider(flow, { label: "Swell size", min: 30, max: 500, step: 5, fmt: mm, get: (s) => s.sea.scale, set: (s, v) => (s.sea.scale = v) });
   (() => {

@@ -379,3 +379,33 @@ test("bands swell and pinch along their length when swell is on", () => {
   assert.ok(ratio(0) < 1.3, `steady band varies ${ratio(0)}`);
   assert.ok(ratio(1) > 2, `swelling band only varies ${ratio(1)}`);
 });
+
+// How often a line switches between climbing and falling, per 100 mm of its length.
+function crestsPer100mm(lines) {
+  let flips = 0, length = 0;
+  for (const l of lines) {
+    if (lineLength(l) < 80) continue;
+    let prev = 0;
+    for (let i = 6; i < l.length; i += 6) {
+      const dy = l[i][1] - l[i - 6][1], dx = l[i][0] - l[i - 6][0];
+      const slope = Math.abs(dx) > 1e-9 ? dy / Math.abs(dx) : 0;
+      const sign = slope > 0.15 ? 1 : slope < -0.15 ? -1 : 0;
+      if (sign && prev && sign !== prev) flips++;
+      if (sign) prev = sign;
+    }
+    length += lineLength(l);
+  }
+  return (flips / length) * 100;
+}
+
+test("wave height makes each line itself rise and fall along its length", () => {
+  const d = design();
+  d.style.sea.turbulence = 0;
+  d.style.sea.strokeType = "bands";
+  d.style.sea.wavelength = 60;
+  const flat = crestsPer100mm(core.generate(d, "full").streamlines);
+  d.style.sea.waves = 0.8;
+  const wavy = crestsPer100mm(core.generate(d, "full").streamlines);
+  assert.ok(flat < 0.3, `flat sea flips ${flat.toFixed(2)} per 100 mm`);
+  assert.ok(wavy > 2, `wavy sea flips only ${wavy.toFixed(2)} per 100 mm (expect ~3.3 for a 60 mm wavelength)`);
+});
