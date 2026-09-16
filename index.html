@@ -294,6 +294,53 @@ globalThis.WaveCore = (() => {
     const c = Math.cos(t.r), s = Math.sin(t.r);
     return [t.x + t.s * (c * x - s * y), t.y + t.s * (s * x + c * y)];
   }
+  function insideRings(rings, x, y) {
+    let inside = false; // even-odd, so holes in imported SVGs stay open
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+      }
+    }
+    return inside;
+  }
+  const BOAT = {
+    sail: [[-6, -55], [-26, 34], [28, 28]],
+    hull: [[-46, 36], [46, 32], [26, 56], [-31, 58]],
+    sailColor: "#f0eada",
+    hullColor: "#96643c",
+  };
+  function circleRing(r, n = 32) {
+    return Array.from({ length: n }, (_, i) => [r * Math.cos((2 * Math.PI * i) / n), r * Math.sin((2 * Math.PI * i) / n)]);
+  }
+  // Filled parts of an element in local coordinates: [{rings, color, kind}]
+  function localFills(el, design, rng) {
+    switch (el.type) {
+      case "dot":
+        return [{ rings: [circleRing(el.radius)], kind: "dot",
+          color: mixColor(pickColor(design.palette.strokes, rng), design.palette.letter, design.emphasis) }];
+      case "boat":
+        return [{ rings: [BOAT.sail], color: el.sailColor || BOAT.sailColor, kind: "boat" },
+                { rings: [BOAT.hull], color: el.hullColor || BOAT.hullColor, kind: "boat" }];
+      case "shape":
+      case "svg":
+        return [{ rings: el.rings, color: el.color, kind: el.type }];
+      default:
+        return [];
+    }
+  }
+
+  function interiorSamples(rings, spacing) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const ring of rings) for (const [x, y] of ring) {
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+    const pts = [];
+    for (let x = x0; x <= x1; x += spacing) for (let y = y0; y <= y1; y += spacing) {
+      if (insideRings(rings, x, y)) pts.push([x, y]);
+    }
+    return pts;
+  }
   function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
   function mixColor(a, b, f) {
     const A = hexToRgb(a), B = hexToRgb(b);
@@ -316,8 +363,23 @@ globalThis.WaveCore = (() => {
       offsetSeeds(pts, dsep, seeds);
       letterLines.push(pts);
     }
+    const guides = letterLines.slice();
+    const fills = [];
+    for (const el of design.elements) {
+      for (const fill of localFills(el, design, rng)) {
+        const rings = fill.rings.map((ring) => ring.map((p) => applyTransform(el.transform, p)));
+        fills.push({ ...fill, rings });
+        for (const ring of rings) {
+          const outline = resample(ring.concat([ring[0]]), step);
+          packer.add(outline, dsep / 2);
+          offsetSeeds(outline, dsep, seeds);
+          guides.push(outline);
+        }
+        packer.add(interiorSamples(rings, dsep / 2), dsep / 2);
+      }
+    }
     const sigma = dsep * (0.6 + 4.4 * design.bend);
-    const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3), letterLines, sigma);
+    const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3), guides, sigma);
     const lines = streamlines(W, H, field, packer, seeds, dsep, step, sea.length, rng);
 
     const profile = brushProfile(sea.taper);
@@ -338,7 +400,7 @@ globalThis.WaveCore = (() => {
       const poly = ribbon(line, width, lerped, dsep / 4);
       if (poly) ribbons.push({ points: poly, color, kind: "letter" });
     }
-    return { width: W, height: H, background: design.palette.background, streamlines: lines, ribbons, fills: [] };
+    return { width: W, height: H, background: design.palette.background, streamlines: lines, ribbons, fills };
   }
 
   return { defaultDesign, generate };

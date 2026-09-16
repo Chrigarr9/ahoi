@@ -74,3 +74,39 @@ test("the flow bends along a drawn stroke, more strongly with higher bend", () =
   const weak = core.generate(d, "full");
   assert.ok(verticalShareNear(weak.streamlines, 25) < verticalShareNear(strong.streamlines, 25));
 });
+
+function insideRings(rings, x, y) {
+  let inside = false;
+  for (const ring of rings) for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+test("dots, boats, shapes and imported SVGs are filled obstacles the sea never enters", () => {
+  const d = design();
+  d.elements = [
+    { id: "d", type: "dot", transform: { x: 50, y: 50, s: 1, r: 0 }, radius: 6 },
+    { id: "b", type: "boat", transform: { x: 120, y: 120, s: 1, r: 0.3 } },
+    { id: "sh", type: "shape", transform: { ...identity }, color: "#aa5500",
+      rings: [[[30, 180], [80, 180], [80, 220], [30, 220]]] },
+    { id: "sv", type: "svg", transform: { x: 150, y: 210, s: 2, r: 0 }, color: "#112233",
+      rings: [[[-10, -10], [10, -10], [10, 10], [-10, 10]]] },
+  ];
+  const out = core.generate(d, "full");
+
+  const known = {
+    dot: (x, y) => Math.hypot(x - 50, y - 50) < 6,
+    shape: (x, y) => x > 30 && x < 80 && y > 180 && y < 220,
+    svg: (x, y) => x > 130 && x < 170 && y > 190 && y < 230,
+  };
+  assert.ok(out.fills.some((f) => f.color === "#aa5500") && out.fills.some((f) => f.color === "#112233"));
+  const boatFills = out.fills.filter((f) => f.kind === "boat");
+  assert.strictEqual(boatFills.length, 2, "boat = sail + hull");
+
+  for (const line of out.streamlines) for (const [x, y] of line) {
+    for (const [name, inside] of Object.entries(known)) assert.ok(!inside(x, y), `streamline inside ${name} at ${x},${y}`);
+    for (const f of boatFills) assert.ok(!insideRings(f.rings, x, y), `streamline inside boat at ${x},${y}`);
+  }
+});
