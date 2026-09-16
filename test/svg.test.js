@@ -21,12 +21,13 @@ function sampleDesign() {
 
 test("exported SVG has physical size and one path per ribbon and fill", () => {
   const d = sampleDesign();
+  d.style.palette.transparent = null;
   const geo = core.generate(d, "full");
   const svg = core.exportSVG(d, geo);
 
   assert.match(svg, /<svg[^>]* width="20cm" height="25cm" viewBox="0 0 200 250"/);
   assert.strictEqual((svg.match(/<path /g) || []).length, geo.ribbons.length + geo.fills.length);
-  assert.match(svg, /fill="#587ca0"/, "background colour");
+  assert.match(svg, /<rect width="200" height="250" fill="#86C4E3"\/>/, "background colour");
 });
 
 test("reopening an exported SVG restores the exact design", () => {

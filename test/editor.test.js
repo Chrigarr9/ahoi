@@ -566,3 +566,40 @@ test("importing a lopsided figure keeps its far-reaching parts after laying it f
   const [, w] = new RegExp(`<image id="figure-${id}"[^>]* width="(\\d+)"`).exec(svg);
   assert.ok(+w >= 290, `figure cut off: ${w} px long instead of about 298`);
 });
+
+// Share of fully transparent pixels in an exported PNG, decoded by the browser
+const transparentShare = (page, png) => page.evaluate(async (b64) => {
+  const img = new Image();
+  img.src = "data:image/png;base64," + b64;
+  await img.decode();
+  const c = document.createElement("canvas");
+  c.width = img.width; c.height = img.height;
+  const x = c.getContext("2d");
+  x.drawImage(img, 0, 0);
+  const d = x.getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] === 0) n++;
+  return n / (d.length / 4);
+}, png.toString("base64"));
+
+// the jersey photo decodes asynchronously: wait until the shirt shows on the stage centre line
+const shirtPainted = (page) => page.waitForFunction(() => {
+  const c = document.getElementById("stage");
+  return c.getContext("2d").getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.95), 1, 1).data[3] > 0;
+});
+
+test("a new design previews on the jersey as a transparent back print in the shirt colour", async () => {
+  const page = await openTool();
+  const d = await exportedDesign(page);
+  assert.strictEqual(d.style.palette.transparent, "background");
+  assert.strictEqual(d.style.palette.background, "#86C4E3");
+  await page.getByLabel("DPI").fill("40");
+  assert.ok((await transparentShare(page, await download(page, "Export PNG"))) > 0.2, "the print has no background");
+
+  await page.getByRole("button", { name: "Jersey", exact: true }).click();
+  await shirtPainted(page);
+  // near the hem on the centre line: far below the print (it starts 8 cm under the neck and is 42 cm tall)
+  const [r, g, b, a] = await pixelAt(page, 0.5, 0.95);
+  assert.ok(a === 255 && b > 200 && g > 160 && r > 100 && r < 180, `light-blue shirt, got ${[r, g, b, a]}`);
+  assert.deepStrictEqual(page.errors, []);
+});

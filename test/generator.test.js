@@ -208,7 +208,7 @@ function assertRides(out, f, spacing) {
   const along = (p) => (p[0] - f.x) * Math.cos(f.angle) + (p[1] - f.y) * Math.sin(f.angle);
   const wake = out.ribbons.filter((r) => r.kind === "wake" && r.figure === out.figures.indexOf(f));
   assert.ok(wake.length > 0, "figure without a wake");
-  assert.ok(wake.every((r) => r.color === "#eee8d6"), "wake colour");
+  assert.ok(wake.every((r) => r.color === "#ffffff"), "wake colour");
   const pts = wake.flatMap((r) => r.points);
   assert.ok(pts.every((p) => along(p) < f.length * 0.1), "wake reaches in front of the figure");
   const tail = [f.x - (Math.cos(f.angle) * f.length) / 2, f.y - (Math.sin(f.angle) * f.length) / 2];
