@@ -183,22 +183,64 @@ test("accents scatter dots and flecks in the gaps, never on letters or obstacles
   }
 });
 
-test("surfer accents ride the sea as obstacles, away from letters and shapes", () => {
+// Corners and centre of a placed surfer picture: [x, y, heading angle, length, width] in mm
+function surferFootprint({ x, y, angle, length, width }) {
+  const ux = Math.cos(angle), uy = Math.sin(angle);
+  return [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) =>
+    [x + (a * length / 2) * ux - (b * width / 2) * uy, y + (a * length / 2) * uy + (b * width / 2) * ux]);
+}
+
+test("surfer pictures ride on top of the sea along the flow, away from letters and shapes, each with a wake", () => {
   const d = design();
   d.drawing.elements = [verticalStroke(), box];
-  assert.strictEqual(core.generate(d, "full").fills.filter((f) => f.kind === "surfer").length, 0);
+  assert.strictEqual(core.generate(d, "full").surfers.length, 0);
 
   d.style.variety.surfers = 1;
   const out = core.generate(d, "full");
-  const surfers = out.fills.filter((f) => f.kind === "surfer");
-  assert.ok(surfers.length > 0, "no surfers placed");
-  for (const f of surfers) for (const p of f.rings.flat()) {
-    assert.ok(!inBox(p), "surfer inside obstacle");
-    assert.ok(Math.abs(p[0] - 100) >= d.style.sea.spacingMm / 2 || p[1] < 36 || p[1] > 204, `surfer on letter at ${p}`);
+  assert.ok(out.surfers.length > 0, "no surfers placed");
+  const spacing = d.style.sea.spacingMm;
+  for (const s of out.surfers) {
+    assert.ok(Number.isInteger(s.sprite) && s.sprite >= 0, `sprite index ${s.sprite}`);
+    for (const p of surferFootprint(s)) {
+      assert.ok(!inBox(p), "surfer on the shape");
+      assert.ok(Math.abs(p[0] - 100) >= spacing / 2 || p[1] < 36 || p[1] > 204, `surfer on letter at ${p}`);
+    }
+    // heading follows the sea lines running close to the surfer (orientation only: either way along the line)
+    let best = null;
+    for (const line of out.streamlines) for (let i = 1; i < line.length; i++) {
+      const dist = Math.hypot(line[i][0] - s.x, line[i][1] - s.y);
+      if (!best || dist < best.dist) best = { dist, a: Math.atan2(line[i][1] - line[i - 1][1], line[i][0] - line[i - 1][0]) };
+    }
+    const diff = Math.abs(Math.sin(best.a - s.angle));
+    assert.ok(best.dist < spacing && diff < Math.sin(Math.PI / 7), `surfer heading off the flow by ${Math.asin(diff)} rad`);
+    // wake: foam in the palette's lightest colour, trailing behind the tail (it may curve with the flow)
+    const along = (p) => (p[0] - s.x) * Math.cos(s.angle) + (p[1] - s.y) * Math.sin(s.angle);
+    const wake = out.ribbons.filter((r) => r.kind === "wake" && r.surfer === out.surfers.indexOf(s));
+    assert.ok(wake.length > 0, "surfer without a wake");
+    assert.ok(wake.every((r) => r.color === "#eee8d6"), "wake colour");
+    const pts = wake.flatMap((r) => r.points);
+    assert.ok(pts.every((p) => along(p) < s.length * 0.1), "wake reaches in front of the surfer");
+    const tail = [s.x - (Math.cos(s.angle) * s.length) / 2, s.y - (Math.sin(s.angle) * s.length) / 2];
+    assert.ok(Math.max(...pts.map((p) => Math.hypot(p[0] - tail[0], p[1] - tail[1]))) > s.length, "wake too short");
   }
-  for (const line of out.streamlines) for (const [x, y] of line) {
-    for (const f of surfers) assert.ok(!insideRings(f.rings, x, y), "sea runs through a surfer");
-  }
+  // the sea keeps running underneath: surfers sit on top of the waves
+  const under = out.streamlines.some((line) => line.some(([px, py]) => out.surfers.some((s) =>
+    Math.abs((px - s.x) * Math.cos(s.angle) + (py - s.y) * Math.sin(s.angle)) < s.length / 3 &&
+    Math.abs(-(px - s.x) * Math.sin(s.angle) + (py - s.y) * Math.cos(s.angle)) < s.width / 3)));
+  assert.ok(under, "no sea under the surfers");
+});
+
+test("surfer size sets how long the surfers are printed", () => {
+  const d = design();
+  d.style.variety.surfers = 1;
+  d.style.variety.surferSize = 3;
+  const small = core.generate(d, "full").surfers;
+  d.style.variety.surferSize = 6;
+  const big = core.generate(d, "full").surfers;
+  const median = (ss) => ss.map((s) => s.length).sort((a, b) => a - b)[ss.length >> 1];
+  assert.ok(small.length && big.length);
+  assert.ok(Math.abs(median(big) / median(small) - 2) < 0.6, `sizes ${median(small)} vs ${median(big)}`);
+  assert.ok(median(small) > 20 && median(small) < 45, `3 cm surfers are ${median(small)} mm long`);
 });
 
 test("a woven shape becomes letter strokes along its outline with sea flowing inside", () => {
@@ -304,7 +346,7 @@ test("every flow preset produces a filled sea, and Ripcurl brings surfers", () =
     core.applyFlowPreset(d.style, n);
     const out = core.generate(d, "preview");
     assert.ok(out.ribbons.length > 20, `${n}: ${out.ribbons.length} ribbons`);
-    if (n === "Ripcurl") assert.ok(out.fills.some((f) => f.kind === "surfer"), "Ripcurl without surfers");
+    if (n === "Ripcurl") assert.ok(out.surfers.length > 0, "Ripcurl without surfers");
   }
 });
 

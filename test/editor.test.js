@@ -391,3 +391,30 @@ test("the size is the first step and a new design starts as A3 portrait", async 
   assert.deepStrictEqual(JSON.parse(JSON.stringify((await exportedDesign(page)).drawing.canvas)), { widthCm: 42, heightCm: 59.4 });
   assert.deepStrictEqual(page.errors, []);
 });
+
+test("surfer pictures show up on the canvas where the exported SVG places them", async () => {
+  const page = await openTool();
+  await page.locator("summary", { hasText: "Variety" }).click();
+  await page.getByRole("slider", { name: "Surfer size" }).fill("6");
+  const before = await page.locator("#status").innerText();
+  await page.getByRole("slider", { name: "Surfers", exact: true }).fill("1");
+  await page.waitForFunction((t) => document.getElementById("status").textContent !== t, before); // preview rebuilt
+  const svg = (await download(page, "Export SVG")).toString("utf8");
+  const [, W, H] = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg).map(Number);
+  const placed = [...svg.matchAll(/<use [^>]*?translate\(([\d.-]+) ([\d.-]+)\)/g)].map((m) => [m[1] / W, m[2] / H]);
+  assert.ok(placed.length > 0, "no surfers in the export");
+
+  // the palette is blue and cream; only the pictures (skin, boards, swimwear) are clearly warm
+  const warmPixels = (fx, fy) => page.evaluate(([fx, fy]) => {
+    const c = document.getElementById("stage");
+    const r = Math.round(c.width * 0.03), x0 = Math.floor(fx * c.width) - r, y0 = Math.floor(fy * c.height) - r;
+    const d = c.getContext("2d").getImageData(x0, y0, 2 * r, 2 * r).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] - d[i + 2] > 40) n++;
+    return n;
+  }, [fx, fy]);
+  let shown = 0;
+  for (const [fx, fy] of placed) if ((await warmPixels(fx, fy)) > 10) shown++;
+  assert.strictEqual(shown, placed.length, `${shown} of ${placed.length} surfers visible`);
+  assert.deepStrictEqual(page.errors, []);
+});

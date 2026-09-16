@@ -104,3 +104,16 @@ test("a style file round-trips with its name and fills in settings added later",
   assert.throws(() => core.parseStyle('{"hello": 1}'), /not a wave style/i);
   assert.throws(() => core.parseStyle("<svg/>"), /not a wave style/i);
 });
+
+test("exported SVG embeds each used surfer picture once and places every surfer", () => {
+  const d = sampleDesign();
+  d.style.variety.surfers = 1;
+  const geo = core.generate(d, "full");
+  assert.ok(geo.surfers.length > 0);
+  const svg = core.exportSVG(d, geo);
+  const used = new Set(geo.surfers.map((s) => s.sprite));
+  assert.strictEqual((svg.match(/<image /g) || []).length, used.size);
+  assert.match(svg, /<image [^>]*href="data:image\/png;base64,/);
+  assert.strictEqual((svg.match(/<use /g) || []).length, geo.surfers.length);
+  assert.strictEqual((svg.match(/<path /g) || []).length, geo.ribbons.length + geo.fills.length);
+});
