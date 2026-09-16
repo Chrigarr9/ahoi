@@ -2,9 +2,139 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Wave Name Studio</title>
+<style>
+  :root {
+    --bg: #eef1f4; --panel: #ffffff; --ink: #1d2733; --muted: #66727f; --line: #d8dee5;
+    --accent: #2f6fa3; --accent-ink: #ffffff; --work: #cfd6dd; --danger: #b3412f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151a20; --panel: #1d242c; --ink: #e3e8ee; --muted: #93a0ad; --line: #2e3842;
+      --accent: #6aa7d8; --accent-ink: #0d1620; --work: #0f1318; --danger: #e07a66; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 300px 1fr; height: 100vh; }
+  .panel { background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; padding: 12px 14px 40px; }
+  h1 { font-size: 16px; margin: 2px 0 10px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 18px 0 8px; }
+  section { border-top: 1px solid var(--line); }
+  label { display: block; margin: 6px 0; }
+  .slider span, .field span { display: flex; justify-content: space-between; color: var(--muted); }
+  .slider output { color: var(--ink); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; }
+  input[type=number], select { width: 100%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--panel); color: var(--ink); font: inherit; }
+  .row { display: flex; gap: 8px; align-items: end; margin: 6px 0; }
+  .row > * { flex: 1; margin: 0; }
+  .row > .narrow { flex: 0 0 auto; }
+  button { font: inherit; padding: 5px 10px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; border-color: var(--line); }
+  button[aria-pressed=true], button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .swatch { display: grid; grid-template-columns: 34px 1fr auto; gap: 8px; align-items: center; margin: 4px 0; }
+  input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
+  .colors { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .colors label { display: flex; align-items: center; gap: 6px; margin: 0; }
+  main { display: grid; grid-template-rows: auto auto 1fr; min-width: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  .toolbar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+  #status { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hint { padding: 4px 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  .workspace { position: relative; background: var(--work); overflow: hidden; display: grid; place-items: center; }
+  #stage { box-shadow: 0 2px 12px rgba(0,0,0,.25); touch-action: none; }
+  #toast { position: fixed; bottom: 16px; right: 16px; max-width: 420px; padding: 10px 14px; border-radius: 6px;
+    background: var(--ink); color: var(--panel); opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #toast.error { background: var(--danger); color: #fff; }
+</style>
 </head>
 <body>
+<div class="app">
+  <aside class="panel">
+    <h1>Wave Name Studio</h1>
+
+    <section>
+      <h2>File</h2>
+      <div class="row">
+        <button id="open-btn">Open SVG…</button>
+        <button id="export-svg" class="primary">Export SVG</button>
+      </div>
+      <div class="row">
+        <button id="export-png">Export PNG</button>
+        <label class="field narrow"><span>DPI</span><input id="dpi" type="number" value="150" min="36" max="1200" style="width:80px"></label>
+      </div>
+      <input type="file" id="open-file" accept=".svg,image/svg+xml" hidden>
+    </section>
+
+    <section>
+      <h2>Canvas</h2>
+      <label class="field"><span>Preset</span><select id="canvas-preset"></select></label>
+      <div class="row">
+        <label class="field"><span>Width (cm)</span><input id="canvas-w" type="number" min="1" max="500" step="0.1"></label>
+        <label class="field"><span>Height (cm)</span><input id="canvas-h" type="number" min="1" max="500" step="0.1"></label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Letters</h2>
+      <div id="letter-controls"></div>
+    </section>
+
+    <section>
+      <h2>Sea</h2>
+      <label class="field"><span>Flow preset</span><select id="flow-preset"></select></label>
+      <div id="sea-controls"></div>
+      <div class="row">
+        <label class="field"><span>Seed</span><input id="seed" type="number" step="1"></label>
+        <button id="reseed" class="narrow" title="Random seed">New seed</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Colours</h2>
+      <label class="field"><span>Palette preset</span><select id="palette-preset"></select></label>
+      <div class="colors">
+        <label><input type="color" id="bg-color" aria-label="Background colour">Background</label>
+        <label><input type="color" id="letter-color" aria-label="Letter colour">Letters</label>
+      </div>
+      <h2>Stroke colours <small>(colour · share)</small></h2>
+      <div id="stroke-colors"></div>
+      <button id="add-color">Add colour</button>
+    </section>
+
+    <section id="selection-panel" hidden>
+      <h2>Selection</h2>
+      <div id="selection-controls" class="colors"></div>
+    </section>
+  </aside>
+
+  <main>
+    <div class="toolbar" id="toolbar">
+      <button data-tool="select" title="Select, move, scale, rotate (V)">Select</button>
+      <button data-tool="stroke" title="Draw a letter stroke (L)">Letter</button>
+      <button data-tool="dot" title="Place a dot (D)">Dot</button>
+      <button data-tool="boat" title="Place the boat (B)">Boat</button>
+      <button data-tool="shape" title="Draw a filled shape (S)">Shape</button>
+      <button id="import-btn" title="Import an SVG silhouette">Import SVG…</button>
+      <input type="file" id="import-file" accept=".svg,image/svg+xml" hidden>
+      <span class="sep"></span>
+      <button id="undo" title="Ctrl+Z">Undo</button>
+      <button id="redo" title="Ctrl+Shift+Z">Redo</button>
+      <button id="delete" title="Delete">Delete</button>
+      <span class="sep"></span>
+      <button id="render-full" title="Render at full detail">Render full</button>
+      <span id="status" role="status"></span>
+    </div>
+    <div class="hint" id="hint"></div>
+    <div class="workspace" id="workspace"><canvas id="stage"></canvas></div>
+  </main>
+</div>
+<div id="toast" aria-live="polite"></div>
 <script id="core">
 // Pure generator: design -> geometry. No DOM access (tests run it in Node).
 // All geometry is in millimetres on the canvas.
@@ -341,6 +471,15 @@ globalThis.WaveCore = (() => {
     }
     return pts;
   }
+  // Outline polylines of an element in local coordinates (selection box, hit testing, drag ghost)
+  function localOutlines(el) {
+    switch (el.type) {
+      case "stroke": return [el.points];
+      case "dot": return [circleRing(el.radius)];
+      case "boat": return [BOAT.sail, BOAT.hull];
+      default: return el.rings;
+    }
+  }
   function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
   function mixColor(a, b, f) {
     const A = hexToRgb(a), B = hexToRgb(b);
@@ -427,7 +566,618 @@ globalThis.WaveCore = (() => {
     return JSON.parse(unescapeXml(m[1]));
   }
 
-  return { defaultDesign, generate, exportSVG, loadDesignFromSVG };
+  return { defaultDesign, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings };
+})();
+</script>
+<script id="app">
+(() => {
+  const core = WaveCore;
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- presets (canvas sizes are starting points; confirm real panel sizes with the printer)
+  const CANVAS_PRESETS = [
+    ["Jersey panel (placeholder) 50 × 70", 50, 70],
+    ["A3 portrait 29.7 × 42", 29.7, 42],
+    ["A2 portrait 42 × 59.4", 42, 59.4],
+    ["Square 50 × 50", 50, 50],
+  ];
+  const FLOW_PRESETS = {
+    Calm: { tilt: 0, turbulence: 0.25, scale: 260, length: 120, width: 0.6, taper: 0.5 },
+    "Diagonal breeze": { tilt: -15, turbulence: 0.35, scale: 200, length: 90, width: 0.6, taper: 0.5 },
+    Stormy: { tilt: 0, turbulence: 0.9, scale: 110, length: 70, width: 0.55, taper: 0.6 },
+    "Hokusai curls": { tilt: 5, turbulence: 1.5, scale: 70, length: 150, width: 0.65, taper: 0.8 },
+  };
+  const PALETTES = {
+    Sea: { background: "#587ca0", letter: "#eee8d6", strokes: [["#eee8d6", 0.55], ["#a8c0d2", 0.3], ["#3e5e80", 0.15]] },
+    Sunset: { background: "#242e50", letter: "#f2a262", strokes: [["#f2a262", 0.45], ["#e26858", 0.3], ["#fae0ac", 0.25]] },
+    Ink: { background: "#f4efe3", letter: "#1c2640", strokes: [["#1c2640", 0.7], ["#78829a", 0.3]] },
+    Mint: { background: "#e2ece4", letter: "#266060", strokes: [["#266060", 0.5], ["#60a496", 0.3], ["#d27e5c", 0.2]] },
+  };
+
+  // ---------- state + undo
+  let design = core.defaultDesign();
+  let undoStack = [], redoStack = [], coalesce = null;
+  let tool = "select", selectedId = null;
+  let geo = null, statusNote = "";
+
+  function snapshot() {
+    undoStack.push(JSON.stringify(design));
+    if (undoStack.length > 200) undoStack.shift();
+    redoStack = [];
+  }
+  // key: consecutive edits with the same key within a second form one undo step (slider drags)
+  function mutate(fn, key) {
+    const now = performance.now();
+    if (!(key && coalesce && coalesce.key === key && now - coalesce.t < 1000)) snapshot();
+    coalesce = key ? { key, t: now } : null;
+    fn(design);
+    changed();
+  }
+  function changed({ immediate = false } = {}) {
+    if (!design.elements.some((e) => e.id === selectedId)) selectedId = null;
+    refreshControls();
+    schedulePreview(immediate);
+    draw();
+  }
+  function undo() {
+    if (!undoStack.length) return;
+    redoStack.push(JSON.stringify(design));
+    design = JSON.parse(undoStack.pop());
+    coalesce = null;
+    changed();
+  }
+  function redo() {
+    if (!redoStack.length) return;
+    undoStack.push(JSON.stringify(design));
+    design = JSON.parse(redoStack.pop());
+    coalesce = null;
+    changed();
+  }
+  const selected = () => design.elements.find((e) => e.id === selectedId) || null;
+  function select(id) {
+    selectedId = id;
+    refreshSelectionPanel();
+    $("delete").disabled = !id;
+    draw();
+  }
+  let idCounter = 0;
+  const newId = () => "e" + Date.now().toString(36) + (idCounter++).toString(36);
+
+  // ---------- generation
+  let previewTimer = null;
+  function schedulePreview(immediate) {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => regenerate("preview"), immediate ? 0 : 80);
+  }
+  function regenerate(quality) {
+    clearTimeout(previewTimer);
+    const t0 = performance.now();
+    geo = core.generate(design, quality);
+    const ms = Math.round(performance.now() - t0);
+    paintSea();
+    draw();
+    const label = quality === "full" ? "Full render" : "Preview";
+    setStatus(`${label} · ${geo.ribbons.length} strokes · ${ms} ms`);
+    return geo;
+  }
+  function setStatus(text) {
+    $("status").textContent = statusNote ? `${statusNote} · ${text}` : text;
+  }
+
+  // ---------- view: the canvas shows exactly the print area
+  const stage = $("stage"), ctx = stage.getContext("2d");
+  const seaCanvas = document.createElement("canvas");
+  let k = 1, dpr = 1; // CSS px per mm, device pixel ratio
+  const W = () => design.canvas.widthCm * 10, H = () => design.canvas.heightCm * 10;
+
+  function layout() {
+    const ws = $("workspace").getBoundingClientRect();
+    const pad = 24;
+    k = Math.max(0.05, Math.min((ws.width - 2 * pad) / W(), (ws.height - 2 * pad) / H()));
+    dpr = window.devicePixelRatio || 1;
+    stage.style.width = W() * k + "px";
+    stage.style.height = H() * k + "px";
+    stage.width = seaCanvas.width = Math.round(W() * k * dpr);
+    stage.height = seaCanvas.height = Math.round(H() * k * dpr);
+    paintSea();
+    draw();
+  }
+  new ResizeObserver(layout).observe($("workspace"));
+
+  function paintGeometry(c, g) {
+    c.fillStyle = g.background;
+    c.fillRect(0, 0, g.width, g.height);
+    const groups = new Map();
+    for (const r of g.ribbons) {
+      const key = r.kind + r.color;
+      if (!groups.has(key)) groups.set(key, { color: r.color, kind: r.kind, path: new Path2D() });
+      const p = groups.get(key).path;
+      p.moveTo(r.points[0][0], r.points[0][1]);
+      for (let i = 1; i < r.points.length; i++) p.lineTo(r.points[i][0], r.points[i][1]);
+      p.closePath();
+    }
+    for (const kind of ["sea", "letter"]) {
+      for (const grp of groups.values()) if (grp.kind === kind) { c.fillStyle = grp.color; c.fill(grp.path); }
+    }
+    for (const f of g.fills) {
+      const p = new Path2D();
+      for (const ring of f.rings) {
+        p.moveTo(ring[0][0], ring[0][1]);
+        for (let i = 1; i < ring.length; i++) p.lineTo(ring[i][0], ring[i][1]);
+        p.closePath();
+      }
+      c.fillStyle = f.color;
+      c.fill(p, "evenodd");
+    }
+  }
+  function paintSea() {
+    const c = seaCanvas.getContext("2d");
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, seaCanvas.width, seaCanvas.height);
+    if (!geo) return;
+    // geometry may be from before a canvas resize; map its own size onto the stage
+    c.setTransform((seaCanvas.width / geo.width) * (geo.width / W()), 0, 0, (seaCanvas.height / geo.height) * (geo.height / H()), 0, 0);
+    paintGeometry(c, geo);
+  }
+
+  // ---------- element geometry helpers (world mm)
+  const worldOutlines = (el) => core.localOutlines(el).map((line) => line.map((p) => core.applyTransform(el.transform, p)));
+  function localBox(el) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const line of core.localOutlines(el)) for (const [x, y] of line) {
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+    const pad = design.sea.spacingMm / 2 / el.transform.s; // thin strokes still get a grabbable box
+    return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+  }
+  function toLocal(el, [x, y]) {
+    const t = el.transform, dx = (x - t.x) / t.s, dy = (y - t.y) / t.s;
+    const c = Math.cos(-t.r), s = Math.sin(-t.r);
+    return [c * dx - s * dy, s * dx + c * dy];
+  }
+  function handles(el) {
+    const [x0, y0, x1, y1] = localBox(el);
+    const w = (p) => core.applyTransform(el.transform, p);
+    const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(w);
+    const top = w([(x0 + x1) / 2, y0]), c = [el.transform.x, el.transform.y];
+    const len = Math.hypot(top[0] - c[0], top[1] - c[1]) || 1;
+    const rotate = [top[0] + ((top[0] - c[0]) / len) * (26 / k), top[1] + ((top[1] - c[1]) / len) * (26 / k)];
+    return { corners, top, rotate };
+  }
+  function hitTest(p) {
+    for (let i = design.elements.length - 1; i >= 0; i--) {
+      const el = design.elements[i];
+      const [lx, ly] = toLocal(el, p);
+      const [x0, y0, x1, y1] = localBox(el);
+      if (lx >= x0 && lx <= x1 && ly >= y0 && ly <= y1) return el;
+    }
+    return null;
+  }
+
+  // ---------- overlay drawing
+  function draw() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, stage.width, stage.height);
+    ctx.drawImage(seaCanvas, 0, 0);
+    ctx.setTransform(k * dpr, 0, 0, k * dpr, 0, 0);
+    const px = 1 / k;
+    ctx.lineJoin = ctx.lineCap = "round";
+
+    if (drawing) {
+      ctx.strokeStyle = design.palette.letter;
+      ctx.lineWidth = tool === "shape" ? 2 * px : design.sea.spacingMm * 0.6;
+      ctx.beginPath();
+      drawing.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      if (tool === "shape") ctx.closePath();
+      ctx.stroke();
+    }
+    const el = selected();
+    if (el) {
+      ctx.strokeStyle = "#ff7a1a";
+      ctx.lineWidth = 1.5 * px;
+      for (const line of worldOutlines(el)) {
+        ctx.beginPath();
+        line.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        if (el.type !== "stroke") ctx.closePath();
+        ctx.stroke();
+      }
+      const h = handles(el);
+      ctx.setLineDash([4 * px, 3 * px]);
+      ctx.beginPath();
+      h.corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.moveTo(...h.top); ctx.lineTo(...h.rotate);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#ffffff";
+      for (const [x, y] of h.corners) { ctx.fillRect(x - 4 * px, y - 4 * px, 8 * px, 8 * px); ctx.strokeRect(x - 4 * px, y - 4 * px, 8 * px, 8 * px); }
+      ctx.beginPath(); ctx.arc(h.rotate[0], h.rotate[1], 5 * px, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    }
+  }
+
+  // ---------- pointer tools
+  const HINTS = {
+    select: "Click an element to select it. Drag to move, drag a corner to scale, drag the round handle to rotate. Delete removes it.",
+    stroke: "Drag to draw a letter stroke. The waves bend along it. A spiral makes a whirlpool.",
+    dot: "Click to place a dot (like the dot on an i).",
+    boat: "Click to place the boat. The waves part around it.",
+    shape: "Drag a closed outline to make a filled shape the waves flow around.",
+  };
+  let drawing = null, dragOp = null;
+
+  function toMM(e) {
+    const r = stage.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * W(), ((e.clientY - r.top) / r.height) * H()];
+  }
+  function setTool(t) {
+    tool = t;
+    for (const b of document.querySelectorAll("[data-tool]")) b.setAttribute("aria-pressed", String(b.dataset.tool === t));
+    $("hint").textContent = HINTS[t];
+    stage.style.cursor = t === "select" ? "default" : "crosshair";
+    select(t === "select" ? selectedId : null);
+  }
+  function addElement(el) {
+    mutate((d) => d.elements.push(el));
+    return el;
+  }
+  // Recentre points on their centroid so the element rotates and scales about its middle.
+  function centred(points) {
+    const cx = points.reduce((a, p) => a + p[0], 0) / points.length;
+    const cy = points.reduce((a, p) => a + p[1], 0) / points.length;
+    const round = (v) => Math.round(v * 100) / 100;
+    return { transform: { x: round(cx), y: round(cy), s: 1, r: 0 }, local: points.map(([x, y]) => [round(x - cx), round(y - cy)]) };
+  }
+
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    stage.setPointerCapture(e.pointerId);
+    const p = toMM(e);
+    if (tool === "stroke" || tool === "shape") {
+      drawing = [p];
+    } else if (tool === "dot") {
+      addElement({ id: newId(), type: "dot", transform: { x: p[0], y: p[1], s: 1, r: 0 }, radius: design.sea.spacingMm * 0.7 });
+    } else if (tool === "boat") {
+      const el = addElement({ id: newId(), type: "boat", transform: { x: p[0], y: p[1], s: (H() * 0.18) / 113, r: 0 } });
+      setTool("select");
+      select(el.id);
+    } else if (tool === "select") {
+      const el = selected();
+      const near = (q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 10 / k;
+      const before = JSON.stringify(design);
+      if (el && near(handles(el).rotate)) {
+        dragOp = { mode: "rotate", el, before, start: { ...el.transform }, a0: Math.atan2(p[1] - el.transform.y, p[0] - el.transform.x) };
+      } else if (el && handles(el).corners.some(near)) {
+        dragOp = { mode: "scale", el, before, start: { ...el.transform }, d0: Math.hypot(p[0] - el.transform.x, p[1] - el.transform.y) || 1 };
+      } else {
+        const hit = hitTest(p);
+        if (hit) dragOp = { mode: "move", el: hit, before, start: { ...hit.transform }, p0: p };
+        select(hit ? hit.id : null);
+      }
+    }
+  });
+  stage.addEventListener("pointermove", (e) => {
+    const p = toMM(e);
+    if (drawing) {
+      const last = drawing[drawing.length - 1];
+      if (Math.hypot(p[0] - last[0], p[1] - last[1]) >= Math.max(0.5, 2 / k)) { drawing.push(p); draw(); }
+    } else if (dragOp) {
+      const { el, start } = dragOp, t = el.transform;
+      if (dragOp.mode === "move") { t.x = start.x + p[0] - dragOp.p0[0]; t.y = start.y + p[1] - dragOp.p0[1]; }
+      if (dragOp.mode === "scale") t.s = Math.max(0.02, start.s * (Math.hypot(p[0] - t.x, p[1] - t.y) / dragOp.d0));
+      if (dragOp.mode === "rotate") t.r = start.r + Math.atan2(p[1] - t.y, p[0] - t.x) - dragOp.a0;
+      draw();
+    }
+  });
+  stage.addEventListener("pointerup", () => {
+    if (drawing) {
+      const pts = drawing;
+      drawing = null;
+      let len = 0;
+      for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      if (tool === "stroke" && len >= 3) {
+        const { transform, local } = centred(pts);
+        addElement({ id: newId(), type: "stroke", transform, points: local });
+      } else if (tool === "shape" && pts.length >= 3 && len >= 10) {
+        const { transform, local } = centred(pts);
+        addElement({ id: newId(), type: "shape", transform, color: design.palette.strokes[0].color, rings: [local] });
+      } else draw();
+    } else if (dragOp) {
+      const { el, start, before } = dragOp;
+      dragOp = null;
+      const t = el.transform;
+      if (t.x !== start.x || t.y !== start.y || t.s !== start.s || t.r !== start.r) {
+        undoStack.push(before);
+        redoStack = [];
+        coalesce = null;
+        changed();
+      }
+    }
+  });
+
+  function deleteSelected() {
+    if (!selectedId) return;
+    const id = selectedId;
+    mutate((d) => { d.elements = d.elements.filter((e) => e.id !== id); });
+  }
+
+  // ---------- panel controls
+  const sliders = [];
+  function slider(parent, { label, min, max, step, get, set, fmt = (v) => v, key }) {
+    const wrap = document.createElement("label");
+    wrap.className = "slider";
+    wrap.innerHTML = `<span>${label}<output></output></span><input type="range" min="${min}" max="${max}" step="${step}">`;
+    const input = wrap.querySelector("input"), out = wrap.querySelector("output");
+    input.setAttribute("aria-label", label);
+    input.addEventListener("input", () => mutate((d) => set(d, parseFloat(input.value)), key || label));
+    parent.appendChild(wrap);
+    sliders.push(() => { const v = get(design); input.value = v; out.textContent = fmt(v); });
+  }
+  const pct = (v) => Math.round(v * 100) + "%";
+  slider($("letter-controls"), { label: "Letter emphasis (hidden → visible)", min: 0, max: 1, step: 0.01, fmt: pct,
+    get: (d) => d.emphasis, set: (d, v) => (d.emphasis = v) });
+  slider($("letter-controls"), { label: "Flow bend along letters", min: 0, max: 1, step: 0.01, fmt: pct,
+    get: (d) => d.bend, set: (d, v) => (d.bend = v) });
+  const sea = $("sea-controls");
+  slider(sea, { label: "Tilt", min: -90, max: 90, step: 1, fmt: (v) => v + "°", get: (d) => d.sea.tilt, set: (d, v) => (d.sea.tilt = v) });
+  slider(sea, { label: "Turbulence", min: 0, max: 2, step: 0.05, get: (d) => d.sea.turbulence, set: (d, v) => (d.sea.turbulence = v) });
+  slider(sea, { label: "Swell size", min: 30, max: 500, step: 5, fmt: (v) => v + " mm", get: (d) => d.sea.scale, set: (d, v) => (d.sea.scale = v) });
+  slider(sea, { label: "Spacing", min: 3, max: 30, step: 0.5, fmt: (v) => v + " mm", get: (d) => d.sea.spacingMm, set: (d, v) => (d.sea.spacingMm = v) });
+  slider(sea, { label: "Stroke width", min: 0.2, max: 1, step: 0.05, fmt: pct, get: (d) => d.sea.width, set: (d, v) => (d.sea.width = v) });
+  slider(sea, { label: "Stroke length", min: 20, max: 400, step: 5, fmt: (v) => v + " mm", get: (d) => d.sea.length, set: (d, v) => (d.sea.length = v) });
+  slider(sea, { label: "Taper", min: 0, max: 1, step: 0.05, fmt: pct, get: (d) => d.sea.taper, set: (d, v) => (d.sea.taper = v) });
+
+  function fillSelect(sel, placeholder, names) {
+    sel.innerHTML = `<option value="">${placeholder}</option>` + names.map((n, i) => `<option value="${i}">${n}</option>`).join("");
+  }
+  fillSelect($("canvas-preset"), "Choose size…", CANVAS_PRESETS.map((p) => p[0]));
+  fillSelect($("flow-preset"), "Choose flow…", Object.keys(FLOW_PRESETS));
+  fillSelect($("palette-preset"), "Choose palette…", Object.keys(PALETTES));
+
+  $("canvas-preset").addEventListener("change", (e) => {
+    const p = CANVAS_PRESETS[e.target.value];
+    e.target.value = "";
+    if (p) mutate((d) => { d.canvas.widthCm = p[1]; d.canvas.heightCm = p[2]; });
+  });
+  $("flow-preset").addEventListener("change", (e) => {
+    const p = Object.values(FLOW_PRESETS)[e.target.value];
+    e.target.value = "";
+    if (p) mutate((d) => Object.assign(d.sea, p));
+  });
+  $("palette-preset").addEventListener("change", (e) => {
+    const p = Object.values(PALETTES)[e.target.value];
+    e.target.value = "";
+    if (p) mutate((d) => {
+      d.palette = { background: p.background, letter: p.letter, strokes: p.strokes.map(([color, weight]) => ({ color, weight })) };
+    });
+  });
+  function numberField(input, get, set, min, max) {
+    input.addEventListener("change", () => {
+      const v = parseFloat(input.value);
+      if (!Number.isFinite(v)) { input.value = get(design); return; }
+      mutate((d) => set(d, Math.min(max, Math.max(min, v))));
+    });
+    sliders.push(() => { if (document.activeElement !== input) input.value = get(design); });
+  }
+  numberField($("canvas-w"), (d) => d.canvas.widthCm, (d, v) => (d.canvas.widthCm = v), 1, 500);
+  numberField($("canvas-h"), (d) => d.canvas.heightCm, (d, v) => (d.canvas.heightCm = v), 1, 500);
+  numberField($("seed"), (d) => d.sea.seed, (d, v) => (d.sea.seed = Math.round(v)), 0, 2 ** 31 - 1);
+  $("reseed").addEventListener("click", () => mutate((d) => (d.sea.seed = Math.floor(Math.random() * 1e6))));
+
+  function colorInput(input, get, set, key) {
+    input.addEventListener("input", () => mutate((d) => set(d, input.value), key));
+    sliders.push(() => (input.value = get(design)));
+  }
+  colorInput($("bg-color"), (d) => d.palette.background, (d, v) => (d.palette.background = v), "bg");
+  colorInput($("letter-color"), (d) => d.palette.letter, (d, v) => (d.palette.letter = v), "letter");
+
+  function refreshStrokeColors() {
+    const list = $("stroke-colors"), strokes = design.palette.strokes;
+    if (list.children.length !== strokes.length) {
+      list.innerHTML = "";
+      strokes.forEach((_, i) => {
+        const row = document.createElement("div");
+        row.className = "swatch";
+        row.innerHTML = `<input type="color" aria-label="Stroke colour ${i + 1}"><input type="range" min="0.01" max="1" step="0.01" aria-label="Share of colour ${i + 1}"><button aria-label="Remove colour ${i + 1}">×</button>`;
+        const [color, weight, remove] = row.children;
+        color.addEventListener("input", () => mutate((d) => (d.palette.strokes[i].color = color.value), "sc" + i));
+        weight.addEventListener("input", () => mutate((d) => (d.palette.strokes[i].weight = parseFloat(weight.value)), "sw" + i));
+        remove.addEventListener("click", () => { if (design.palette.strokes.length > 1) mutate((d) => d.palette.strokes.splice(i, 1)); });
+        list.appendChild(row);
+      });
+    }
+    strokes.forEach((s, i) => {
+      const [color, weight, remove] = list.children[i].children;
+      color.value = s.color; weight.value = s.weight; remove.disabled = strokes.length < 2;
+    });
+  }
+  $("add-color").addEventListener("click", () => mutate((d) => d.palette.strokes.push({ color: "#ffffff", weight: 0.2 })));
+
+  function refreshSelectionPanel() {
+    const el = selected(), panel = $("selection-panel"), box = $("selection-controls");
+    panel.hidden = !el;
+    box.innerHTML = "";
+    if (!el) return;
+    const add = (label, get, set) => {
+      const wrap = document.createElement("label");
+      wrap.innerHTML = `<input type="color" aria-label="${label}">${label}`;
+      const input = wrap.querySelector("input");
+      input.value = get();
+      input.addEventListener("input", () => mutate((d) => set(d.elements.find((e) => e.id === el.id), input.value), "sel" + label + el.id));
+      box.appendChild(wrap);
+    };
+    if (el.type === "boat") {
+      add("Sail", () => el.sailColor || "#f0eada", (e, v) => (e.sailColor = v));
+      add("Hull", () => el.hullColor || "#96643c", (e, v) => (e.hullColor = v));
+    } else if (el.type === "shape" || el.type === "svg") {
+      add("Fill", () => el.color, (e, v) => (e.color = v));
+    } else {
+      box.innerHTML = `<span style="color:var(--muted)">${el.type === "dot" ? "Dot" : "Letter stroke"}: colour follows the letter emphasis.</span>`;
+    }
+  }
+
+  function refreshControls() {
+    for (const s of sliders) s();
+    refreshStrokeColors();
+    refreshSelectionPanel();
+    $("undo").disabled = !undoStack.length;
+    $("redo").disabled = !redoStack.length;
+    $("delete").disabled = !selectedId;
+    const size = `${design.canvas.widthCm * 10}x${design.canvas.heightCm * 10}`;
+    if (stage.dataset.size !== size) { stage.dataset.size = size; layout(); }
+  }
+
+  // ---------- files
+  let toastTimer;
+  function toast(msg, error = false) {
+    const t = $("toast");
+    t.textContent = msg;
+    t.className = "show" + (error ? " error" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.className = ""), 5000);
+  }
+  function download(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  $("export-svg").addEventListener("click", () => {
+    const g = regenerate("full");
+    download(new Blob([core.exportSVG(design, g)], { type: "image/svg+xml" }), "wave-design.svg");
+  });
+  $("export-png").addEventListener("click", () => {
+    const dpi = parseFloat($("dpi").value);
+    if (!(dpi > 0)) return toast("Enter a DPI first.", true);
+    const pw = Math.round((design.canvas.widthCm / 2.54) * dpi), ph = Math.round((design.canvas.heightCm / 2.54) * dpi);
+    if (pw > 16384 || ph > 16384 || pw * ph > 268e6) {
+      return toast(`${pw} × ${ph} px is more than the browser can render. Lower the DPI or use the SVG export.`, true);
+    }
+    const g = regenerate("full");
+    const c = document.createElement("canvas");
+    c.width = pw; c.height = ph;
+    const x = c.getContext("2d");
+    x.scale(pw / g.width, ph / g.height);
+    paintGeometry(x, g);
+    c.toBlob((blob) => blob ? download(blob, "wave-design.png") : toast("PNG export failed (canvas too large for this browser).", true), "image/png");
+  });
+
+  $("open-btn").addEventListener("click", () => $("open-file").click());
+  $("open-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const loaded = core.loadDesignFromSVG(await file.text());
+      snapshot();
+      design = loaded;
+      selectedId = null;
+      statusNote = `Opened ${file.name}`;
+      changed({ immediate: true });
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  $("import-btn").addEventListener("click", () => $("import-file").click());
+  $("import-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const { rings, color } = svgToRings(await file.text());
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const ring of rings) for (const [x, y] of ring) {
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+      const size = (W() * 0.35) / Math.max(x1 - x0, y1 - y0, 1e-6);
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      const local = rings.map((ring) => ring.map(([x, y]) => [Math.round((x - cx) * size * 100) / 100, Math.round((y - cy) * size * 100) / 100]));
+      const el = addElement({ id: newId(), type: "svg", name: file.name, transform: { x: W() / 2, y: H() / 2, s: 1, r: 0 },
+        color: color || design.palette.letter, rings: local });
+      setTool("select");
+      select(el.id);
+    } catch (err) {
+      toast(err.message, true);
+    }
+  });
+
+  // Flatten every filled shape of an SVG into polygons, using the browser's own path geometry.
+  function svgToRings(text) {
+    const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+    if (doc.querySelector("parsererror") || doc.documentElement.nodeName.toLowerCase() !== "svg") {
+      throw new Error("That file is not a readable SVG.");
+    }
+    const host = document.createElement("div");
+    host.style.cssText = "position:absolute;left:-10000px;top:0;visibility:hidden";
+    const svg = document.importNode(doc.documentElement, true);
+    svg.setAttribute("width", "1000");
+    svg.setAttribute("height", "1000");
+    host.appendChild(svg);
+    document.body.appendChild(host);
+    try {
+      const rootInv = svg.getScreenCTM().inverse();
+      const rings = [];
+      let color = null;
+      for (const el of svg.querySelectorAll("path, polygon, polyline, rect, circle, ellipse")) {
+        if (el.closest("defs, clipPath, mask, symbol, pattern")) continue;
+        const len = el.getTotalLength();
+        if (!(len > 0)) continue;
+        const fill = getComputedStyle(el).fill;
+        if (!color && fill && fill.startsWith("rgb")) {
+          color = "#" + fill.match(/\d+/g).slice(0, 3).map((v) => (+v).toString(16).padStart(2, "0")).join("");
+        }
+        const m = rootInv.multiply(el.getScreenCTM());
+        const n = Math.min(4000, Math.max(24, Math.ceil(len / 2)));
+        const stepLen = len / n;
+        let ring = [], prev = null;
+        for (let i = 0; i <= n; i++) {
+          const q = el.getPointAtLength(Math.min(len, i * stepLen));
+          if (prev && Math.hypot(q.x - prev.x, q.y - prev.y) > 1.5 * stepLen) { // jumped to the next subpath
+            if (ring.length >= 3) rings.push(ring);
+            ring = [];
+          }
+          const t = q.matrixTransform(m);
+          ring.push([t.x, t.y]);
+          prev = q;
+        }
+        if (ring.length >= 3) rings.push(ring);
+      }
+      if (!rings.length) throw new Error("No filled shapes found in that SVG.");
+      return { rings, color };
+    } finally {
+      host.remove();
+    }
+  }
+
+  // ---------- toolbar + keyboard
+  for (const b of document.querySelectorAll("[data-tool]")) b.addEventListener("click", () => setTool(b.dataset.tool));
+  $("undo").addEventListener("click", undo);
+  $("redo").addEventListener("click", redo);
+  $("delete").addEventListener("click", deleteSelected);
+  $("render-full").addEventListener("click", () => regenerate("full"));
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest("input, select, textarea")) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); }
+    else if (!mod) {
+      const t = { v: "select", l: "stroke", d: "dot", b: "boat", s: "shape" }[e.key.toLowerCase()];
+      if (t) setTool(t);
+    }
+  });
+  // any edit clears the "Opened …" note
+  const clearNote = () => { statusNote = ""; };
+  stage.addEventListener("pointerdown", clearNote, true);
+  $("toolbar").addEventListener("click", clearNote, true);
+  document.querySelector(".panel").addEventListener("input", clearNote, true);
+
+  setTool("select");
+  refreshControls();
+  regenerate("preview");
 })();
 </script>
 </body>
