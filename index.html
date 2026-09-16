@@ -245,6 +245,17 @@ globalThis.WaveCore = (() => {
     return strokes[strokes.length - 1].color;
   }
 
+  // ---------- elements
+  function applyTransform(t, [x, y]) {
+    const c = Math.cos(t.r), s = Math.sin(t.r);
+    return [t.x + t.s * (c * x - s * y), t.y + t.s * (s * x + c * y)];
+  }
+  function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+  function mixColor(a, b, f) {
+    const A = hexToRgb(a), B = hexToRgb(b);
+    return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * f).toString(16).padStart(2, "0")).join("");
+  }
+
   function generate(design, quality = "full") {
     const W = design.canvas.widthCm * 10, H = design.canvas.heightCm * 10;
     const sea = design.sea, dsep = sea.spacingMm;
@@ -253,7 +264,16 @@ globalThis.WaveCore = (() => {
     const rng = mulberry32(sea.seed * 7919 + 17);
     const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3));
     const packer = new Packer(dsep);
-    const lines = streamlines(W, H, field, packer, [], dsep, step, sea.length, rng);
+    const seeds = [];
+    const letterLines = [];
+    for (const el of design.elements) {
+      if (el.type !== "stroke" || el.points.length < 2) continue;
+      const pts = resample(el.points.map((p) => applyTransform(el.transform, p)), step);
+      packer.add(pts, dsep / 2);
+      offsetSeeds(pts, dsep, seeds);
+      letterLines.push(pts);
+    }
+    const lines = streamlines(W, H, field, packer, seeds, dsep, step, sea.length, rng);
 
     const profile = brushProfile(sea.taper);
     const ribbons = [];
@@ -263,6 +283,15 @@ globalThis.WaveCore = (() => {
       const color = pickColor(design.palette.strokes, rng);
       const poly = ribbon(line, width, profile, dsep / 4);
       if (poly) ribbons.push({ points: poly, color, kind: "sea" });
+    }
+    const e = design.emphasis;
+    const steady = (t) => Math.pow(Math.min(1, t / 0.05, (1 - t) / 0.1), 0.5);
+    for (const line of letterLines) {
+      const width = dsep * (sea.width * (0.65 + 0.35 * rng()) * (1 - e) + 0.8 * e);
+      const color = mixColor(pickColor(design.palette.strokes, rng), design.palette.letter, e);
+      const lerped = (t) => profile(t) * (1 - e) + steady(t) * e;
+      const poly = ribbon(line, width, lerped, dsep / 4);
+      if (poly) ribbons.push({ points: poly, color, kind: "letter" });
     }
     return { width: W, height: H, background: design.palette.background, streamlines: lines, ribbons, fills: [] };
   }
