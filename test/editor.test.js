@@ -786,3 +786,26 @@ test("the edge fade sliders set how strokes fade out towards the border", async 
   assert.deepStrictEqual([edges.enabled, edges.fadeWidth, edges.fadeShorter, edges.fadeThinner, edges.fadeSparser], [true, 50, 0.6, 0.3, 0.8]);
   assert.deepStrictEqual(page.errors, []);
 });
+
+test("Add text drops text in the middle; typing, font, layout and brush change it; undo steps back", async () => {
+  const page = await openTool();
+  await page.getByRole("button", { name: "Add text", exact: true }).click();
+  await page.getByLabel("Text", { exact: true }).fill("Ahoi\nCrew");
+  await page.getByLabel("Font", { exact: true }).selectOption("Allure");
+  await page.getByRole("button", { name: "Align right", exact: true }).click();
+  await page.getByLabel("Letter height (cm)", { exact: true }).fill("6.5");
+  await page.getByLabel("Letter height (cm)", { exact: true }).press("Enter");
+  await page.getByRole("slider", { name: "Line spacing", exact: true }).fill("2");
+  await page.getByRole("slider", { name: "Letter spacing", exact: true }).fill("0.2");
+  await page.getByRole("button", { name: "Visible", exact: true }).click();
+  await page.getByRole("slider", { name: "Slant", exact: true }).fill("-10");
+
+  const [text] = (await exportedDesign(page)).drawing.elements;
+  const { type, transform: { x, y }, font, align, heightCm, lineSpacing, letterSpacing, slant, mode } = text;
+  assert.deepStrictEqual({ type, x, y, text: text.text, font, align, heightCm, lineSpacing, letterSpacing, slant, mode },
+    { type: "text", x: 148.5, y: 210, text: "Ahoi\nCrew", font: "Allure", align: "right", heightCm: 6.5, lineSpacing: 2, letterSpacing: 0.2, slant: -10, mode: "visible" });
+
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  assert.strictEqual((await exportedDesign(page)).drawing.elements[0].slant, 0);
+  assert.deepStrictEqual(page.errors, []);
+});

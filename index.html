@@ -69,6 +69,10 @@
   .figure-grid button { padding: 2px; height: 44px; display: grid; place-items: center; background: #587ca0; }
   .figure-grid button[aria-pressed=true] { outline: 3px solid var(--sel); outline-offset: -3px; }
   .figure-grid img { max-width: 100%; max-height: 38px; }
+  .text-controls label { display: block; }
+  .text-controls textarea { width: 100%; box-sizing: border-box; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px;
+    background: var(--panel); color: var(--ink); font: 16px/1.3 system-ui, sans-serif; resize: vertical; }
+  .text-controls .row { align-items: end; }
   .brush-controls .segmented { margin: 4px 0; }
   .brush-controls [hidden] { display: none; }
   .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
@@ -166,6 +170,7 @@
         <button data-tool="stamp" title="Stamp surfers, boats or the letter boat (B)"><span class="icon" aria-hidden="true">⛵</span>Stamp</button>
         <button data-tool="shape" title="Draw a shape (S)"><span class="icon" aria-hidden="true">⬠</span>Shape</button>
         <button id="import-btn" title="Import an SVG silhouette"><span class="icon" aria-hidden="true">⇪</span>Import SVG…</button>
+        <button id="add-text" title="Type text in a single-line font, painted with the brush"><span class="icon" aria-hidden="true">T</span>Add text</button>
         <button data-tool="select" class="wide" title="Select, move, scale, rotate (V)"><span aria-hidden="true">↖</span>Select</button>
       </div>
       <div id="brush-panel" hidden>
@@ -1621,7 +1626,7 @@ globalThis.WaveCore = (() => {
   }
 
   return { brushOf, paintColor, strokeOutline, defaultDesign, defaultStyle, JERSEY_SIZES, defaultBackPrint, FLOW_PRESETS, PALETTES, applyFlowPreset, paletteFromPreset, surpriseStyle,
-    exportStyle, parseStyle, centred, eraseStrokes, figure, registerFigures, figureList: () => [...FIGURES.values()], letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings,
+    exportStyle, parseStyle, centred, textStrokes, eraseStrokes, figure, registerFigures, figureList: () => [...FIGURES.values()], letterPath, generate, exportSVG, loadDesignFromSVG, localOutlines, applyTransform, insideRings,
     textLines, fontNames: () => Object.keys(STROKE_FONTS), TEXT_DEFAULTS };
 })();
 </script>
@@ -1836,15 +1841,17 @@ globalThis.WaveCore = (() => {
         }
         continue;
       }
-      if (el.type === "stroke") {
+      if (el.type === "stroke" || el.type === "text") {
         const spacing = design.style.sea.spacingMm;
-        const { ring } = core.strokeOutline(el, design.style, core.letterPath(el, design.style, spacing / 10), spacing * 0.6);
-        if (!ring) continue;
-        c.beginPath();
-        ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
-        c.closePath();
-        c.fillStyle = core.brushOf(el).mode === "visible" ? core.paintColor(el.color, design.style.palette) : "#1d2733";
-        c.fill();
+        for (const stroke of el.type === "text" ? core.textStrokes(el) : [el]) {
+          const { ring } = core.strokeOutline(stroke, design.style, core.letterPath(stroke, design.style, spacing / 10), spacing * 0.6);
+          if (!ring) continue;
+          c.beginPath();
+          ring.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+          c.closePath();
+          c.fillStyle = core.brushOf(stroke).mode === "visible" ? core.paintColor(stroke.color, design.style.palette) : "#1d2733";
+          c.fill();
+        }
         continue;
       }
       c.beginPath();
@@ -1982,7 +1989,7 @@ globalThis.WaveCore = (() => {
       x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
     }
     const auto = el.type === "stroke" && el.points.length === 1 ? 0.7 * design.style.sea.spacingMm : 0; // an automatic-size dot
-    const half = el.type === "stroke" && typeof el.size === "number" ? el.size / 2 : auto;
+    const half = (el.type === "stroke" || el.type === "text") && typeof el.size === "number" ? el.size / 2 : auto;
     const pad = Math.max(design.style.sea.spacingMm / 2, half) / el.transform.s; // thin strokes still get a grabbable box
     return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
   }
@@ -2687,6 +2694,49 @@ globalThis.WaveCore = (() => {
 
   // Rebuilt only when the selection changes; otherwise inputs are updated in place so an open picker survives edits.
   let selectionRefreshers = [];
+  const ALIGNS = [["left", "Align left", "⇤"], ["center", "Align centre", "↔"], ["right", "Align right", "⇥"]];
+  // Text box, font, layout and brush of a selected text element
+  function textControls(box, owner, update) {
+    const current = () => els().find((e) => e.id === owner);
+    const wrap = document.createElement("div");
+    wrap.className = "text-controls";
+    wrap.style.gridColumn = "1 / -1";
+    wrap.innerHTML = `<textarea rows="2" aria-label="Text"></textarea>
+      <label class="field"><span>Font</span><select aria-label="Font">${core.fontNames().map((n) => `<option>${n}</option>`).join("")}</select></label>
+      <div class="row"><div class="segmented" role="group" aria-label="Alignment">${ALIGNS.map(([v, l, icon]) => `<button data-align="${v}" aria-label="${l}" title="${l}">${icon}</button>`).join("")}</div>
+        <label class="field"><span>Letter height (cm)</span><input type="number" min="0.5" max="100" step="0.1" aria-label="Letter height (cm)"></label></div>`;
+    box.appendChild(wrap);
+    const text = wrap.querySelector("textarea"), font = wrap.querySelector("select"), height = wrap.querySelector("input");
+    text.addEventListener("input", () => update((e) => (e.text = text.value), "text" + owner));
+    font.addEventListener("change", () => update((e) => (e.font = font.value)));
+    for (const b of wrap.querySelectorAll("[data-align]")) b.addEventListener("click", () => update((e) => (e.align = b.dataset.align)));
+    height.addEventListener("change", () => {
+      const v = parseFloat(height.value);
+      if (Number.isFinite(v)) update((e) => (e.heightCm = Math.min(100, Math.max(0.5, v))));
+    });
+    const refreshers = [(el) => {
+      if (document.activeElement !== text) text.value = el.text;
+      font.value = el.font;
+      for (const b of wrap.querySelectorAll("[data-align]")) b.setAttribute("aria-pressed", String(b.dataset.align === el.align));
+      if (document.activeElement !== height) height.value = el.heightCm;
+    }];
+    for (const [key, label, min, max, step, fmt] of [["lineSpacing", "Line spacing", 0.8, 3, 0.05, (v) => v + "×"],
+      ["letterSpacing", "Letter spacing", -0.2, 1, 0.01, (v) => Math.round(v * 100) + "%"], ["slant", "Slant", -30, 30, 1, (v) => v + "°"]]) {
+      const row = document.createElement("label");
+      row.className = "slider";
+      row.innerHTML = `<span>${label}<output></output></span><input type="range" min="${min}" max="${max}" step="${step}" aria-label="${label}">`;
+      const input = row.querySelector("input");
+      input.addEventListener("input", () => update((e) => (e[key] = parseFloat(input.value)), key + owner));
+      wrap.appendChild(row);
+      refreshers.push((el) => { input.value = el[key]; row.querySelector("output").textContent = fmt(el[key]); });
+    }
+    const holder = document.createElement("div");
+    wrap.appendChild(holder);
+    const brush = brushControls(holder, () => current(), (patch, key) => update((e) => Object.assign(e, patch), key && key + owner));
+    const refresh = (el) => { for (const r of refreshers) r(el); brush(); };
+    refresh(current());
+    selectionRefreshers.push(refresh);
+  }
   function refreshSelectionPanel() {
     const el = selected(), panel = $("selection-panel"), box = $("selection-controls"), modes = $("selection-mode");
     panel.hidden = !el;
@@ -2747,6 +2797,8 @@ globalThis.WaveCore = (() => {
       follow.title = "Forget the hand-set angle and follow the waves again";
       follow.addEventListener("click", () => update((e) => { e.mode = "riding"; e.transform.r = null; }));
       box.appendChild(follow);
+    } else if (el.type === "text") {
+      textControls(box, owner, update);
     } else if (el.type === "stroke") { // brush, size, mode and colour can all change after painting
       const holder = document.createElement("div");
       holder.style.gridColumn = "1 / -1";
@@ -2922,6 +2974,16 @@ globalThis.WaveCore = (() => {
   });
 
   $("import-btn").addEventListener("click", () => $("import-file").click());
+  // typed text lands in the middle with the brush panel's settings; the selection panel takes the typing
+  $("add-text").addEventListener("click", () => {
+    const { pressure, ...brush } = ui.brush;
+    const el = addElement({ id: newId(), type: "text", transform: { x: W() / 2, y: H() / 2, s: 1, r: 0 }, ...core.TEXT_DEFAULTS, text: "Text", ...brush });
+    setTool("select");
+    select(el.id);
+    const box = $("selection-controls").querySelector("textarea");
+    box.focus();
+    box.select();
+  });
   $("import-file").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     e.target.value = "";
