@@ -63,10 +63,11 @@ globalThis.WaveCore = (() => {
     return (sum / norm) * 2.2;
   }
 
-  // ---------- orientation field, stored as doubled angle so direction sign never matters
-  function buildField(W, H, sea, g) {
-    const gw = Math.ceil(W / g) + 3, gh = Math.ceil(H / g) + 3;
-    const C = new Float32Array(gw * gh), S = new Float32Array(gw * gh);
+  // ---------- orientation field, stored as doubled angle so direction sign never matters.
+  // Guides (letter strokes, obstacle outlines) pull the flow along their tangent within ~sigma.
+  function buildField(W, H, sea, g, guides, sigma) {
+    const gw = Math.ceil(W / g) + 3, gh = Math.ceil(H / g) + 3, N = gw * gh;
+    const C = new Float32Array(N), S = new Float32Array(N);
     const tilt = (sea.tilt * Math.PI) / 180;
     for (let j = 0; j < gh; j++) {
       for (let i = 0; i < gw; i++) {
@@ -74,6 +75,49 @@ globalThis.WaveCore = (() => {
         C[j * gw + i] = Math.cos(2 * th);
         S[j * gw + i] = Math.sin(2 * th);
       }
+    }
+    if (!guides.length) return { C, S, gw, gh, g };
+
+    // guide points with doubled-angle tangents
+    const gx = [], gy = [], gc = [], gs = [];
+    for (const line of guides) {
+      for (let n = 0; n < line.length; n++) {
+        const a = line[Math.max(0, n - 1)], b = line[Math.min(line.length - 1, n + 1)];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const tx = (b[0] - a[0]) / len, ty = (b[1] - a[1]) / len;
+        gx.push(line[n][0]); gy.push(line[n][1]); gc.push(tx * tx - ty * ty); gs.push(2 * tx * ty);
+      }
+    }
+    // nearest guide point per node: seed nodes, then two sweeping passes
+    const near = new Int32Array(N).fill(-1), d2 = new Float32Array(N).fill(Infinity);
+    const offer = (o, i, j, idx) => {
+      const dx = gx[idx] - i * g, dy = gy[idx] - j * g, dd = dx * dx + dy * dy;
+      if (dd < d2[o]) { d2[o] = dd; near[o] = idx; }
+    };
+    for (let idx = 0; idx < gx.length; idx++) {
+      const ci = Math.round(gx[idx] / g), cj = Math.round(gy[idx] / g);
+      for (let i = ci - 1; i <= ci + 1; i++) for (let j = cj - 1; j <= cj + 1; j++) {
+        if (i >= 0 && j >= 0 && i < gw && j < gh) offer(j * gw + i, i, j, idx);
+      }
+    }
+    const sweep = (i, j, di, dj) => {
+      const o = j * gw + i;
+      for (const [a, b] of [[-di, 0], [-di, -dj], [0, -dj], [di, -dj]]) {
+        const ni = i + a, nj = j + b;
+        if (ni < 0 || nj < 0 || ni >= gw || nj >= gh) continue;
+        const idx = near[nj * gw + ni];
+        if (idx >= 0) offer(o, i, j, idx);
+      }
+    };
+    for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) sweep(i, j, 1, 1);
+    for (let j = gh - 1; j >= 0; j--) for (let i = gw - 1; i >= 0; i--) sweep(i, j, -1, -1);
+
+    for (let o = 0; o < N; o++) {
+      if (near[o] < 0) continue;
+      const w = Math.exp(-d2[o] / (sigma * sigma));
+      if (w < 1e-4) continue;
+      C[o] = (1 - w) * C[o] + w * gc[near[o]];
+      S[o] = (1 - w) * S[o] + w * gs[near[o]];
     }
     return { C, S, gw, gh, g };
   }
@@ -262,7 +306,6 @@ globalThis.WaveCore = (() => {
     const coarse = quality !== "full";
     const step = dsep / (coarse ? 5 : 10);
     const rng = mulberry32(sea.seed * 7919 + 17);
-    const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3));
     const packer = new Packer(dsep);
     const seeds = [];
     const letterLines = [];
@@ -273,6 +316,8 @@ globalThis.WaveCore = (() => {
       offsetSeeds(pts, dsep, seeds);
       letterLines.push(pts);
     }
+    const sigma = dsep * (0.6 + 4.4 * design.bend);
+    const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3), letterLines, sigma);
     const lines = streamlines(W, H, field, packer, seeds, dsep, step, sea.length, rng);
 
     const profile = brushProfile(sea.taper);

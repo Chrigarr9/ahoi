@@ -48,3 +48,29 @@ test("same design generates identical geometry; another seed does not", () => {
   other.sea.seed += 1;
   assert.notStrictEqual(JSON.stringify(core.generate(other, "full")), JSON.stringify(a));
 });
+
+// Share of streamline steps within `radius` mm of x=100 that run more vertical than horizontal.
+function verticalShareNear(lines, radius) {
+  let vertical = 0, total = 0;
+  for (const line of lines) for (let i = 1; i < line.length; i++) {
+    const [x, y] = line[i], [px, py] = line[i - 1];
+    if (Math.abs(x - 100) > radius || y < 60 || y > 180) continue;
+    total++;
+    if (Math.abs(y - py) > Math.abs(x - px)) vertical++;
+  }
+  return vertical / total;
+}
+
+test("the flow bends along a drawn stroke, more strongly with higher bend", () => {
+  const d = design();
+  d.sea.turbulence = 0; // flat horizontal sea, so any vertical flow comes from the stroke
+  d.elements = [verticalStroke()];
+
+  d.bend = 1;
+  const strong = core.generate(d, "full");
+  assert.ok(verticalShareNear(strong.streamlines, 25) > 0.6, "sea next to the stroke should follow it");
+
+  d.bend = 0;
+  const weak = core.generate(d, "full");
+  assert.ok(verticalShareNear(weak.streamlines, 25) < verticalShareNear(strong.streamlines, 25));
+});
