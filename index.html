@@ -283,7 +283,6 @@
         <button id="zoom-fit" title="Fit to screen">Fit</button>
         <button id="zoom-in" title="Zoom in">+</button>
       </div>
-      <button id="render-full" title="Render at full detail">Render full</button>
       </div>
       <span id="status" role="status"></span>
     </div>
@@ -1000,12 +999,11 @@ globalThis.WaveCore = (() => {
     return "#" + A.map((v, i) => Math.round(v + (B[i] - v) * f).toString(16).padStart(2, "0")).join("");
   }
 
-  function generate(design, quality = "full") {
+  function generate(design) {
     const { drawing, style } = design;
     const W = drawing.canvas.widthCm * 10, H = drawing.canvas.heightCm * 10;
     const sea = style.sea, dsep = sea.spacingMm;
-    const coarse = quality !== "full";
-    const step = dsep / (coarse ? 5 : 10);
+    const step = dsep / 10;
     const rng = mulberry32(sea.seed * 7919 + 17);
     const variety = style.variety;
     // uneven spacing: a slow noise field scales the local separation between 0.45x and 1.85x
@@ -1080,7 +1078,7 @@ globalThis.WaveCore = (() => {
       }
     }
     const sigma = dsep * (0.6 + 4.4 * style.letters.bend);
-    const field = buildField(W, H, sea, dsep / (coarse ? 2 : 3), guides, sigma);
+    const field = buildField(W, H, sea, dsep / 3, guides, sigma);
     // figures: surfers and boats riding on top of the sea along the flow, each trailing a foam wake; placed before the
     // sea so they only avoid letters and shapes, while the sea keeps running underneath
     const figures = obstacleFigures, wakes = [];
@@ -1378,7 +1376,7 @@ globalThis.WaveCore = (() => {
     if (!els().some((e) => e.id === selectedId)) selectedId = null;
     if (viewMode !== "sea") paintSea(); // letter and jersey views show edits right away (the jersey again once the sea is regenerated)
     refreshControls();
-    schedulePreview(immediate);
+    scheduleRender(immediate);
     draw();
   }
   function undo() {
@@ -1406,20 +1404,20 @@ globalThis.WaveCore = (() => {
   const newId = () => "e" + Date.now().toString(36) + (idCounter++).toString(36);
 
   // ---------- generation
-  let previewTimer = null;
-  function schedulePreview(immediate) {
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(() => regenerate("preview"), immediate ? 0 : 80);
+  // one quality only: the canvas always shows exactly what gets exported
+  let renderTimer = null;
+  function scheduleRender(immediate) {
+    clearTimeout(renderTimer);
+    renderTimer = setTimeout(regenerate, immediate ? 0 : 80);
   }
-  function regenerate(quality) {
-    clearTimeout(previewTimer);
+  function regenerate() {
+    clearTimeout(renderTimer);
     const t0 = performance.now();
-    geo = core.generate(design, quality);
+    geo = core.generate(design);
     const ms = Math.round(performance.now() - t0);
     paintSea();
     draw();
-    const label = quality === "full" ? "Full render" : "Preview";
-    setStatus(`${label} · ${geo.ribbons.length} strokes · ${ms} ms`);
+    setStatus(`${geo.ribbons.length} strokes · ${ms} ms`);
     return geo;
   }
   function setStatus(text) {
@@ -1914,7 +1912,7 @@ globalThis.WaveCore = (() => {
     core.registerFigures(list);
     figureStore.put(list).catch(() => toast("Could not store the figures in this browser; they last until you reload.", true));
     buildStampPicker();
-    schedulePreview(true);
+    scheduleRender(true);
   }
   let sheetKind = "surfer";
   $("import-surfers").addEventListener("click", () => { sheetKind = "surfer"; $("figure-sheet").click(); });
@@ -1949,7 +1947,7 @@ globalThis.WaveCore = (() => {
     for (const key of recoloured.keys()) if (key.startsWith(f.id + "[")) recoloured.delete(key);
     addFigures([flipped]);
   });
-  figureStore.all().then((list) => { if (list.length) { core.registerFigures(list); buildStampPicker(); schedulePreview(true); } }).catch(() => {});
+  figureStore.all().then((list) => { if (list.length) { core.registerFigures(list); buildStampPicker(); scheduleRender(true); } }).catch(() => {});
 
   function addElement(el) {
     mutate((d) => d.drawing.elements.push(el));
@@ -2388,7 +2386,7 @@ globalThis.WaveCore = (() => {
     if (!Object.values(groups).some(Boolean)) return toast("Tick at least one thing Surprise me may change.", true);
     const seed = Math.floor(Math.random() * 2 ** 31);
     mutate((d) => { d.style = core.surpriseStyle(d.style, groups, seed); });
-    const g = regenerate("preview");
+    const g = regenerate();
     history.unshift({ style: JSON.parse(JSON.stringify(design.style)), image: thumbnail(g) });
     history.length = Math.min(history.length, 12);
     renderHistory();
@@ -2453,7 +2451,7 @@ globalThis.WaveCore = (() => {
       mutate((d) => { d.style = style; });
       saveStyle(style, name);
       statusNote = `Applied style ${name}`;
-      setStatus("Preview");
+      setStatus("Rendering…");
     } catch (err) {
       toast(err.message, true);
     }
@@ -2478,7 +2476,7 @@ globalThis.WaveCore = (() => {
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
   }
   $("export-svg").addEventListener("click", () => {
-    const g = regenerate("full");
+    const g = regenerate();
     const hrefFor = (id) => design.style.palette.figureColours === "palette" && figureSource(id) instanceof HTMLCanvasElement
       ? figureSource(id).toDataURL("image/png") : core.figure(id).href;
     download(new Blob([core.exportSVG(design, g, hrefFor)], { type: "image/svg+xml" }), "wave-design.svg");
@@ -2490,7 +2488,7 @@ globalThis.WaveCore = (() => {
     if (pw > 16384 || ph > 16384 || pw * ph > 268e6) {
       return toast(`${pw} × ${ph} px is more than the browser can render. Lower the DPI or use the SVG export.`, true);
     }
-    const g = regenerate("full");
+    const g = regenerate();
     const c = document.createElement("canvas");
     c.width = pw; c.height = ph;
     const x = c.getContext("2d");
@@ -2621,7 +2619,6 @@ globalThis.WaveCore = (() => {
   $("undo").addEventListener("click", undo);
   $("redo").addEventListener("click", redo);
   $("delete").addEventListener("click", deleteSelected);
-  $("render-full").addEventListener("click", () => regenerate("full"));
   $("reset").addEventListener("click", () => {
     snapshot();
     coalesce = null;
@@ -2647,7 +2644,7 @@ globalThis.WaveCore = (() => {
   setTool("select");
   renderLibrary();
   refreshControls();
-  regenerate("preview");
+  regenerate();
 })();
 </script>
 </body>

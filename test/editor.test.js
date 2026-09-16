@@ -658,7 +658,8 @@ test("a bigger jersey size makes the same print look smaller on the shirt", asyn
   const small = await printShare();
   await page.getByLabel("Jersey size").selectOption("XXL");
   const big = await printShare();
-  assert.ok(small > 0.2 && big < small * 0.9, `print share on S ${small}, on XXL ${big}`);
+  assert.ok(small > 0.2 && big < small * 0.95, // lengths 70 -> 78 cm: expected share ratio 0.9
+    `print share on S ${small}, on XXL ${big}`);
   assert.deepStrictEqual(page.errors, []);
 });
 
@@ -684,3 +685,12 @@ for (const [device, width, height] of [["an iPad in portrait", 820, 1180], ["an 
     assert.deepStrictEqual(errors, []);
   });
 }
+
+test("the canvas shows exactly the waves that get exported, so there is no separate full render", async () => {
+  const page = await openTool();
+  const shown = Number(/(\d+) strokes/.exec(await page.locator("#status").innerText())[1]);
+  const svg = (await download(page, "Export SVG")).toString("utf8");
+  assert.strictEqual((svg.match(/<path /g) || []).length, shown, "the default design has no fills: one path per stroke on the canvas");
+  assert.strictEqual(await page.getByRole("button", { name: "Render full" }).count(), 0);
+  assert.deepStrictEqual(page.errors, []);
+});

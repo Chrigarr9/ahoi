@@ -31,7 +31,7 @@ const verticalStroke = () => ({
 test("sea streamlines stay at least half a spacing apart and clear of drawn strokes", () => {
   const d = design();
   d.drawing.elements = [verticalStroke()];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   const spacing = d.style.sea.spacingMm;
 
   assert.ok(minDistanceBetween(out.streamlines, out.streamlines) >= spacing / 2);
@@ -40,14 +40,14 @@ test("sea streamlines stay at least half a spacing apart and clear of drawn stro
 });
 
 test("same design generates identical geometry; another seed does not", () => {
-  const a = core.generate(design(), "full");
-  const b = core.generate(design(), "full");
+  const a = core.generate(design());
+  const b = core.generate(design());
   assert.ok(a.ribbons.length > 20, `expected a filled sea, got ${a.ribbons.length} ribbons`);
   assert.deepStrictEqual(JSON.stringify(a), JSON.stringify(b));
 
   const other = design();
   other.style.sea.seed += 1;
-  assert.notStrictEqual(JSON.stringify(core.generate(other, "full")), JSON.stringify(a));
+  assert.notStrictEqual(JSON.stringify(core.generate(other)), JSON.stringify(a));
 });
 
 // Share of streamline steps within `radius` mm of x=100 that run more vertical than horizontal.
@@ -68,11 +68,11 @@ test("the flow bends along a drawn stroke, more strongly with higher bend", () =
   d.drawing.elements = [verticalStroke()];
 
   d.style.letters.bend = 1;
-  const strong = core.generate(d, "full");
+  const strong = core.generate(d);
   assert.ok(verticalShareNear(strong.streamlines, 25) > 0.6, "sea next to the stroke should follow it");
 
   d.style.letters.bend = 0;
-  const weak = core.generate(d, "full");
+  const weak = core.generate(d);
   assert.ok(verticalShareNear(weak.streamlines, 25) < verticalShareNear(strong.streamlines, 25));
 });
 
@@ -96,7 +96,7 @@ test("dots, boats, shapes and imported SVGs are filled obstacles the sea never e
     { id: "sv", type: "svg", transform: { x: 150, y: 210, s: 2, r: 0 }, color: "#112233",
       parts: [[[[-10, -10], [5, -10], [5, 10], [-10, 10]]], [[[-5, -10], [10, -10], [10, 10], [-5, 10]]]] },
   ];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
 
   const known = {
     dot: (x, y) => Math.hypot(x - 50, y - 50) < 6,
@@ -120,7 +120,7 @@ test("width variety spreads sea stroke widths from thin to wide", () => {
   const spread = (variety) => {
     const d = design();
     d.style.variety.width = variety;
-    const widths = core.generate(d, "full").ribbons.filter((r) => r.kind === "sea").map((r) => r.width);
+    const widths = core.generate(d).ribbons.filter((r) => r.kind === "sea").map((r) => r.width);
     return Math.max(...widths) / Math.min(...widths);
   };
   assert.ok(spread(0) < 1.7, `even sea spread ${spread(0)}`);
@@ -146,9 +146,9 @@ function gapVariation(lines) {
 
 test("spacing variety makes dense and open patches", () => {
   const d = design();
-  const even = gapVariation(core.generate(d, "full").streamlines);
+  const even = gapVariation(core.generate(d).streamlines);
   d.style.variety.spacing = 1;
-  const uneven = gapVariation(core.generate(d, "full").streamlines);
+  const uneven = gapVariation(core.generate(d).streamlines);
   assert.ok(uneven > even * 1.5, `gap variation even ${even.toFixed(3)} vs uneven ${uneven.toFixed(3)}`);
 });
 
@@ -158,10 +158,10 @@ const inBox = ([x, y]) => x > 30 && x < 80 && y > 180 && y < 220;
 test("overlay layer adds crossing strokes that still avoid letters and obstacles", () => {
   const d = design();
   d.drawing.elements = [verticalStroke(), box];
-  assert.strictEqual(core.generate(d, "full").ribbons.filter((r) => r.kind === "overlay").length, 0);
+  assert.strictEqual(core.generate(d).ribbons.filter((r) => r.kind === "overlay").length, 0);
 
   d.style.variety.overlay = 1;
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   assert.ok(out.ribbons.filter((r) => r.kind === "overlay").length > 10);
   assert.ok(minDistanceBetween(out.overlayStreamlines, [d.drawing.elements[0].points]) >= d.style.sea.spacingMm / 2);
   assert.ok(!out.overlayStreamlines.flat().some(inBox), "overlay inside obstacle");
@@ -171,11 +171,11 @@ test("accents scatter dots and flecks in the gaps, never on letters or obstacles
   const d = design();
   d.drawing.elements = [verticalStroke(), box];
   const accents = (o) => [...o.ribbons.filter((r) => r.kind === "accent").map((r) => r.points), ...o.fills.filter((f) => f.kind === "accent").map((f) => f.rings[0])];
-  assert.strictEqual(accents(core.generate(d, "full")).length, 0);
+  assert.strictEqual(accents(core.generate(d)).length, 0);
 
   d.style.variety.accents = 1;
   d.style.variety.spacing = 1; // open patches leave room for accents
-  const found = accents(core.generate(d, "full"));
+  const found = accents(core.generate(d));
   assert.ok(found.length > 5, `only ${found.length} accents`);
   for (const pts of found) for (const p of pts) {
     assert.ok(!inBox(p), "accent inside obstacle");
@@ -221,10 +221,10 @@ const seaUnder = (out, figures) => out.streamlines.some((line) => line.some(([px
 test("surfers from the figure library ride on top of the sea along the flow, away from letters and shapes, each with a wake", () => {
   const d = design();
   d.drawing.elements = [verticalStroke(), box];
-  assert.strictEqual(core.generate(d, "full").figures.length, 0);
+  assert.strictEqual(core.generate(d).figures.length, 0);
 
   d.style.variety.surfers = 1;
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   assert.ok(out.figures.length > 0, "no surfers placed");
   for (const f of out.figures) {
     assert.strictEqual(core.figure(f.figure).kind, "surfer", `${f.figure} is not a surfer`);
@@ -238,7 +238,7 @@ test("the boats slider scatters only boats, sized by boat size", () => {
   d.drawing.canvas = { widthCm: 30, heightCm: 40 };
   d.style.variety.boats = 1;
   d.style.variety.boatSize = 5;
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   assert.ok(out.figures.length > 0, "no boats placed");
   assert.ok(out.figures.every((f) => core.figure(f.figure).kind === "boat"), "a surfer among the boats");
   const lengths = out.figures.map((f) => f.length).sort((a, b) => a - b);
@@ -250,7 +250,7 @@ const stamp = (extra) => ({ id: "st", type: "stamp", figure: "a00", mode: "ridin
 test("a riding stamp sits on top of the sea, turns to the flow, and trails a wake", () => {
   const d = design();
   d.drawing.elements = [verticalStroke(), box, stamp({ transform: { x: 172, y: 120, s: 0.5, r: null } })];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   const placed = out.figures.filter((f) => f.stamp === "st");
   assert.strictEqual(placed.length, 1);
   assert.strictEqual(placed[0].figure, "a00");
@@ -263,7 +263,7 @@ test("a riding stamp sits on top of the sea, turns to the flow, and trails a wak
 test("a stamp rotated and scaled by hand keeps that angle and size", () => {
   const d = design();
   d.drawing.elements = [stamp({ transform: { x: 150, y: 70, s: 1.5, r: 1 } })];
-  const [placed] = core.generate(d, "full").figures;
+  const [placed] = core.generate(d).figures;
   assert.strictEqual(placed.angle, 1);
   assert.ok(Math.abs(placed.length - 60 * core.figure("a00").len) < 0.01);
 });
@@ -271,7 +271,7 @@ test("a stamp rotated and scaled by hand keeps that angle and size", () => {
 test("an obstacle stamp makes the waves part around it", () => {
   const d = design();
   d.drawing.elements = [stamp({ figure: "a12", mode: "obstacle", transform: { x: 100, y: 120, s: 1, r: 0.3 } })];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   const [placed] = out.figures;
   assert.strictEqual(placed.angle, 0.3);
   assert.ok(!seaUnder(out, [placed]), "sea runs through the obstacle");
@@ -281,7 +281,7 @@ test("an obstacle stamp makes the waves part around it", () => {
 test("the letter boat can ride on top of the waves with a wake", () => {
   const d = design();
   d.drawing.elements = [{ id: "b1", type: "boat", mode: "riding", transform: { x: 100, y: 120, s: 0.5, r: 0 } }];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   const hull = out.fills.find((f) => f.kind === "boat" && f.rings[0].length === 4).rings;
   assert.ok(out.streamlines.some((line) => line.some(([x, y]) => core.insideRings(hull, x, y))), "sea parts around a riding boat");
   assert.ok(out.ribbons.some((r) => r.kind === "wake" && r.stamp === "b1"), "riding boat without a wake");
@@ -290,24 +290,24 @@ test("the letter boat can ride on top of the waves with a wake", () => {
 test("a stamp following the flow outside the canvas still gets a real angle", () => {
   const d = design();
   d.drawing.elements = [stamp({ transform: { x: 100, y: -80, s: 1, r: null } }), stamp({ id: "st2", transform: { x: 100, y: 400, s: 1, r: null } })];
-  for (const f of core.generate(d, "full").figures) assert.ok(Number.isFinite(f.angle), `stamp ${f.stamp} angle ${f.angle}`);
+  for (const f of core.generate(d).figures) assert.ok(Number.isFinite(f.angle), `stamp ${f.stamp} angle ${f.angle}`);
 });
 
 test("scattered surfers only come from the built-in library, so imports elsewhere never change a design", () => {
   const d = design();
   d.style.variety.surfers = 1;
-  const before = JSON.stringify(core.generate(d, "full").figures);
+  const before = JSON.stringify(core.generate(d).figures);
   core.registerFigures([{ id: "imported-x", kind: "surfer", len: 1, w: 200, h: 80, href: "data:image/png;base64,", imported: true }]);
-  assert.strictEqual(JSON.stringify(core.generate(d, "full").figures), before);
+  assert.strictEqual(JSON.stringify(core.generate(d).figures), before);
 });
 
 test("surfer size sets how long the surfers are printed", () => {
   const d = design();
   d.style.variety.surfers = 1;
   d.style.variety.surferSize = 3;
-  const small = core.generate(d, "full").figures;
+  const small = core.generate(d).figures;
   d.style.variety.surferSize = 6;
-  const big = core.generate(d, "full").figures;
+  const big = core.generate(d).figures;
   const median = (ss) => ss.map((s) => s.length).sort((a, b) => a - b)[ss.length >> 1];
   assert.ok(small.length && big.length);
   assert.ok(Math.abs(median(big) / median(small) - 2) < 0.6, `sizes ${median(small)} vs ${median(big)}`);
@@ -317,7 +317,7 @@ test("surfer size sets how long the surfers are printed", () => {
 test("a woven shape becomes letter strokes along its outline with sea flowing inside", () => {
   const d = design();
   d.drawing.elements = [{ ...box, mode: "woven" }, { id: "b", type: "boat", mode: "woven", transform: { x: 120, y: 90, s: 0.8, r: 0 } }];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
 
   assert.strictEqual(out.fills.length, 0, "woven elements have no flat fill");
   assert.strictEqual(out.ribbons.filter((r) => r.kind === "letter").length, 3, "box outline + sail + hull");
@@ -334,7 +334,7 @@ test("a woven shape becomes letter strokes along its outline with sea flowing in
 test("a wave-filled shape is filled with its own strokes in its colour, and the sea stays out", () => {
   const d = design();
   d.drawing.elements = [{ ...box, mode: "filled" }];
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
 
   assert.strictEqual(out.fills.length, 0);
   const inner = out.ribbons.filter((r) => r.kind === "shapefill");
@@ -350,7 +350,7 @@ test("a wavy border keeps the sea inside the enabled sides only", () => {
   d.style.edges = { enabled: true, inset: 20, amplitude: 5, top: true, right: false, bottom: false, left: true };
   d.style.variety.overlay = 1;
   d.style.variety.accents = 1;
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
   const W = 200;
 
   const marks = [...out.streamlines.flat(), ...out.overlayStreamlines.flat(),
@@ -378,14 +378,14 @@ test("rings bend the sea into arcs around a centre below the canvas", () => {
   const d = calm();
   d.style.sea.rings = 1;
   const [cx, cy] = [100, 250 * 1.35];
-  const radial = segments(core.generate(d, "full").streamlines).map(([x, y, dx, dy]) => {
+  const radial = segments(core.generate(d).streamlines).map(([x, y, dx, dy]) => {
     const r = Math.hypot(x - cx, y - cy); return Math.abs((dx * (x - cx) + dy * (y - cy)) / r);
   });
   assert.ok(radial.filter((v) => v < 0.3).length / radial.length > 0.9, "flow should run along the arcs");
 });
 
 test("vortices curl streamlines into whirlpools", () => {
-  const maxTurn = (v) => { const d = calm(); d.style.sea.vortices = v; return Math.max(...core.generate(d, "full").streamlines.map(turning)); };
+  const maxTurn = (v) => { const d = calm(); d.style.sea.vortices = v; return Math.max(...core.generate(d).streamlines.map(turning)); };
   assert.ok(maxTurn(0) < Math.PI / 2, "flat sea should not curl");
   assert.ok(maxTurn(6) > 1.5 * Math.PI, "vortices should curl lines around");
 });
@@ -395,7 +395,7 @@ test("gradient makes the bottom of the sea rougher than the top", () => {
     const d = design();
     d.style.sea.turbulence = 0.8;
     d.style.sea.gradient = gradient;
-    const segs = segments(core.generate(d, "full").streamlines, 3);
+    const segs = segments(core.generate(d).streamlines, 3);
     const spread = (half) => { const a = half.map(([, , dx, dy]) => Math.atan(dy / (dx || 1e-9))); const m = a.reduce((s, v) => s + v, 0) / a.length; return a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length; };
     return spread(segs.filter((s) => s[1] > 170)) / spread(segs.filter((s) => s[1] < 80));
   };
@@ -404,7 +404,7 @@ test("gradient makes the bottom of the sea rougher than the top", () => {
 
 test("fold marbles the flow into more winding lines", () => {
   const winding = (fold) => { const d = design(); d.style.sea.turbulence = 0.8; d.style.sea.fold = fold;
-    const lines = core.generate(d, "full").streamlines; return lines.reduce((s, l) => s + turning(l), 0) / lines.length; };
+    const lines = core.generate(d).streamlines; return lines.reduce((s, l) => s + turning(l), 0) / lines.length; };
   assert.ok(winding(1) > 1.4 * winding(0), `fold ${winding(1)} vs ${winding(0)}`);
 });
 
@@ -415,7 +415,7 @@ test("every flow preset produces a filled sea, and Ripcurl brings surfers", () =
   for (const n of names) {
     const d = design();
     core.applyFlowPreset(d.style, n);
-    const out = core.generate(d, "preview");
+    const out = core.generate(d);
     assert.ok(out.ribbons.length > 20, `${n}: ${out.ribbons.length} ribbons`);
     if (n === "Ripcurl") assert.ok(out.figures.length > 0, "Ripcurl without surfers");
   }
@@ -429,7 +429,7 @@ test("a transparent stroke colour marks those sea strokes as cut-outs, never let
   d.style.variety.surfers = 1;
   d.style.palette.transparent = 0;
   const cutColor = (d.style.palette.strokes[0].color = "#ff00ff"); // used nowhere else in the palette
-  const out = core.generate(d, "full");
+  const out = core.generate(d);
 
   const cut = out.ribbons.filter((r) => r.cutout);
   assert.ok(cut.length > 5 && cut.every((r) => r.kind === "sea" || r.kind === "overlay"));
@@ -441,7 +441,7 @@ test("a transparent stroke colour marks those sea strokes as cut-outs, never let
 test("a transparent background leaves the background empty", () => {
   const d = design();
   d.style.palette.transparent = "background";
-  assert.strictEqual(core.generate(d, "preview").background, null);
+  assert.strictEqual(core.generate(d).background, null);
 });
 
 test("smoothing straightens a jagged letter stroke without moving its ends", () => {
@@ -450,11 +450,11 @@ test("smoothing straightens a jagged letter stroke without moving its ends", () 
   d.drawing.elements = [{ id: "z", type: "stroke", transform: { ...identity }, points: zigzag }];
   const wobble = (line) => Math.max(...line.slice(8, -8).map(([, y]) => Math.abs(y - 120)));
 
-  const rough = core.generate(d, "full").letterStrokes[0];
+  const rough = core.generate(d).letterStrokes[0];
   assert.ok(wobble(rough) > 2, `unsmoothed wobble ${wobble(rough)}`);
 
   d.style.letters.smooth = 1;
-  const smooth = core.generate(d, "full").letterStrokes[0];
+  const smooth = core.generate(d).letterStrokes[0];
   assert.ok(wobble(smooth) < 0.8, `smoothed wobble ${wobble(smooth)}`);
   const [first, last] = [smooth[0], smooth[smooth.length - 1]];
   assert.ok(Math.hypot(first[0] - 50, first[1] - 117) < 0.5 && Math.hypot(last[0] - 140, last[1] - 117) < 0.5, `ends ${first} ${last}`);
@@ -466,9 +466,9 @@ test("continuous bands run much longer than dashes", () => {
   const d = design();
   d.style.sea.turbulence = 0.3;
   const mean = (lines) => lines.reduce((s, l) => s + lineLength(l), 0) / lines.length;
-  const dashes = core.generate(d, "full").streamlines;
+  const dashes = core.generate(d).streamlines;
   d.style.sea.strokeType = "bands";
-  const bands = core.generate(d, "full").streamlines;
+  const bands = core.generate(d).streamlines;
   assert.ok(mean(bands) > 3 * mean(dashes), `bands ${mean(bands).toFixed(0)} mm vs dashes ${mean(dashes).toFixed(0)} mm`);
 });
 
@@ -485,7 +485,7 @@ test("bands swell and pinch along their length when swell is on", () => {
   d.style.sea.strokeType = "bands";
   const ratio = (swell) => {
     d.style.sea.swell = swell;
-    const longest = core.generate(d, "full").ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length)[0];
+    const longest = core.generate(d).ribbons.filter((r) => r.kind === "sea").sort((a, b) => b.points.length - a.points.length)[0];
     const w = middleWidths(longest.points);
     return Math.max(...w) / Math.min(...w);
   };
@@ -516,9 +516,9 @@ test("wave height makes each line itself rise and fall along its length", () => 
   d.style.sea.turbulence = 0;
   d.style.sea.strokeType = "bands";
   d.style.sea.wavelength = 60;
-  const flat = crestsPer100mm(core.generate(d, "full").streamlines);
+  const flat = crestsPer100mm(core.generate(d).streamlines);
   d.style.sea.waves = 0.8;
-  const wavy = crestsPer100mm(core.generate(d, "full").streamlines);
+  const wavy = crestsPer100mm(core.generate(d).streamlines);
   assert.ok(flat < 0.3, `flat sea flips ${flat.toFixed(2)} per 100 mm`);
   assert.ok(wavy > 2, `wavy sea flips only ${wavy.toFixed(2)} per 100 mm (expect ~3.3 for a 60 mm wavelength)`);
 });
